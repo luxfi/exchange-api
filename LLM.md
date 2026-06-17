@@ -1,4 +1,4 @@
-# LLM.md - Hanzo Exchange Api
+# Hanzo Exchange Api
 
 ## Overview
 Hanzo exchange-api service
