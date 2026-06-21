@@ -11,17 +11,19 @@ permissions:
 
 # Native exchange-api (TypeScript: src/index.ts -> dist/index.js, /v1/graphql with
 # operation-aware amm/dex routing). Publishes the canonical ghcr.io/luxfi/exchange-api
-# image on v* tags. Multi-arch on luxfi's self-hosted ARC pool; arm64 via QEMU until a
-# native arm64 runner is added. Semver-only — only v* tags produce {{version}} manifests.
+# image on v* tags. amd64-only on luxfi's in-cluster ARC pool (lux-build) — the cluster
+# runs amd64 and QEMU arm64 emulation pushes the build from ~5 min to ~2 h; an arm64
+# image can return via a native arm64 runner matrix entry, not via QEMU.
+# Semver-only — only v* tags produce {{version}} manifests.
 
 jobs:
   docker:
-    runs-on: [self-hosted, linux, amd64]
+    # In-cluster ARC pool (lux-build autoscalingrunnerset in lux-k8s, org-scoped to
+    # github.com/luxfi, amd64). Replaces the classic [self-hosted, linux, amd64] triple
+    # serviced by fleet arcd hosts that are not reliably available.
+    runs-on: lux-build
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm64
       - uses: docker/setup-buildx-action@v3
         with:
           driver: docker-container
@@ -42,7 +44,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha,scope=exchange-api
