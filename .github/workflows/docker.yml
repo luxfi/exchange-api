@@ -28,16 +28,37 @@ jobs:
         with:
           driver: docker-container
           driver-opts: network=host
+      # The ghcr.io/luxfi/exchange-api package is org-internal and not yet
+      # linked to this repo, so the repo-scoped GITHUB_TOKEN is denied
+      # write_package on push. Log in with a cross-org PAT (org GH_TOKEN, else
+      # repo UNIVERSE_PAT — both carry write:packages); the source label below
+      # makes GHCR auto-link the package to this repo on first push.
+      - id: pat
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          UNIVERSE_PAT: ${{ secrets.UNIVERSE_PAT }}
+        run: |
+          tok="$GH_TOKEN"; src="GH_TOKEN"
+          if [ -z "$tok" ]; then tok="$UNIVERSE_PAT"; src="UNIVERSE_PAT"; fi
+          if [ -z "$tok" ]; then
+            echo "::error::No GH_TOKEN or UNIVERSE_PAT secret set — cannot push to the unlinked ghcr package"
+            exit 1
+          fi
+          echo "Using secret: $src (length=${#tok})"
+          echo "::add-mask::$tok"
+          { echo "token<<EOF"; echo "$tok"; echo "EOF"; } >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ steps.pat.outputs.token }}
       - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/luxfi/exchange-api
           flavor: latest=false
+          labels: |
+            org.opencontainers.image.source=https://github.com/luxfi/exchange-api
           tags: |
             type=semver,pattern={{version}}
             type=sha,prefix=sha-
@@ -47,7 +68,7 @@ jobs:
           platforms: linux/amd64
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha,scope=exchange-api
-          cache-to: type=gha,scope=exchange-api,mode=max
+          cache-from: type=registry,ref=ghcr.io/luxfi/exchange-api:buildcache-amd64
+          cache-to: type=registry,ref=ghcr.io/luxfi/exchange-api:buildcache-amd64,mode=max
           provenance: false
           push: true
