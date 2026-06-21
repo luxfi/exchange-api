@@ -2,8 +2,17 @@ import fetch from 'node-fetch'
 import { cacheGet, cacheSet, TTL } from './cache'
 
 const BLOCKSCOUT_API = process.env.BLOCKSCOUT_API || 'https://api-explore.lux.network'
-const SUBGRAPH_V2_URL = process.env.SUBGRAPH_URL || 'https://subgraph.lux.network/subgraphs/name/luxfi/uniswap-v2'
-const SUBGRAPH_V3_URL = process.env.SUBGRAPH_V3_URL || 'https://subgraph.lux.network/subgraphs/name/luxfi/uniswap-v3'
+
+// Data source is the NATIVE Lux graph engine (luxfi/graph) embedded in the
+// explorer — NOT a hosted The-Graph node and NOT Uniswap's gateway. The engine
+// serves the uniswap-v2/v3-compatible schema (pools, pairs, swaps, tokens,
+// factories, uniswapFactories) from on-chain 0x9999 settlement events. Both
+// versions point at the one `amm` subgraph; V4 swaps surface as both pools and
+// pairs there. Override per-environment via SUBGRAPH_URL / SUBGRAPH_V3_URL.
+const NATIVE_GRAPH = process.env.SUBGRAPH_URL ||
+  'http://explorer.lux-mainnet.svc:8090/v1/graph/cchain/amm/graphql'
+const SUBGRAPH_V2_URL = NATIVE_GRAPH
+const SUBGRAPH_V3_URL = process.env.SUBGRAPH_V3_URL || NATIVE_GRAPH
 
 export interface BlockscoutToken {
   address_hash: string

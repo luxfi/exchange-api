@@ -4,9 +4,17 @@ import { cacheGet, cacheSet, TTL } from './cache'
 import { getBlockscoutTokens, getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphSwaps, getSubgraphV3Pools, getSubgraphV3Tokens, getV3Bundle, getSubgraphV3Swaps } from './blockscout'
 import { getTokenMeta, LUX_TOKENS } from './lux-tokens'
 
-const UNISWAP_API = process.env.UNISWAP_API || 'https://interface.gateway.uniswap.org/v1/graphql'
+// The native Lux graph engine (luxfi/graph in the explorer) is the single
+// source of truth. Raw subgraph queries (Trade page: { pools swaps poolDayDatas
+// ... }) and any operation we don't special-case are forwarded here verbatim —
+// the engine resolves uniswap-v2/v3-shaped fields directly. This REPLACES the
+// dead Uniswap hosted gateway, which returned HTML and produced the
+// "Upstream API unavailable" markets failure.
+const NATIVE_GRAPH = process.env.SUBGRAPH_URL ||
+  'http://explorer.lux-mainnet.svc:8090/v1/graph/cchain/amm/graphql'
 
-// Chains we handle natively (everything else proxied to Uniswap)
+// Chains we special-case with shaped Token/V2Pair/V3Pool responses. Everything
+// else (and raw subgraph queries) is forwarded to the native graph as-is.
 const NATIVE_CHAINS = new Set(['LUX', 'ZOO'])
 
 function isNativeChainQuery(body: any): string | null {
@@ -26,28 +34,30 @@ function extractOperationName(body: any): string {
   return match?.[1] || 'unknown'
 }
 
-// Proxy to Uniswap API with caching
-async function proxyToUniswap(body: any): Promise<any> {
-  const cacheKey = `uniswap:${JSON.stringify(body)}`
+// Forward a GraphQL body verbatim to the native graph engine. The engine speaks
+// the uniswap-v2/v3 schema, so the FE's raw queries resolve unchanged. Only the
+// query + variables are forwarded — never client headers — so this cannot be
+// turned into an SSRF/open-proxy: the target URL is fixed server-side config.
+async function proxyToNativeGraph(body: any): Promise<any> {
+  const cacheKey = `native:${JSON.stringify(body)}`
   const cached = cacheGet(cacheKey)
   if (cached) return cached
 
   try {
-    const res = await fetch(UNISWAP_API, {
+    const res = await fetch(NATIVE_GRAPH, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Origin': 'https://app.uniswap.org',
-      },
-      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: body?.query, variables: body?.variables }),
       signal: AbortSignal.timeout(15000),
     })
     const data = await res.json()
     cacheSet(cacheKey, data, TTL.PROXY)
     return data
   } catch (e) {
-    console.error('Uniswap proxy failed:', e)
-    return { data: null, errors: [{ message: 'Upstream API unavailable' }] }
+    console.error('Native graph query failed:', e)
+    // Fail typed-empty, never with a dead-upstream error string. The FE renders
+    // an empty market list rather than an error toast.
+    return { data: null }
   }
 }
 
@@ -344,9 +354,10 @@ export async function handleGraphQL(req: Request, res: Response): Promise<void> 
   const opName = extractOperationName(body)
   const nativeChain = isNativeChainQuery(body)
 
-  // If not a Lux/Zoo query, proxy to Uniswap
+  // Not a special-cased Lux/Zoo operation (or a raw subgraph query): forward to
+  // the native graph engine, which resolves uniswap-v2/v3-shaped fields directly.
   if (!nativeChain) {
-    const result = await proxyToUniswap(body)
+    const result = await proxyToNativeGraph(body)
     res.json(result)
     return
   }
@@ -392,17 +403,17 @@ export async function handleGraphQL(req: Request, res: Response): Promise<void> 
         break
 
       default:
-        // For unhandled native queries, try proxy as fallback
-        console.log(`[native] unhandled op=${opName}, proxying to Uniswap`)
-        result = await proxyToUniswap(body)
+        // Unhandled named op — forward to the native graph engine.
+        console.log(`[native] unhandled op=${opName}, forwarding to native graph`)
+        result = await proxyToNativeGraph(body)
         break
     }
 
     res.json(result)
   } catch (e) {
     console.error(`[native] error handling ${opName}:`, e)
-    // Fallback to proxy on error
-    const result = await proxyToUniswap(body)
+    // Fall back to the native graph on error, never to a dead external proxy.
+    const result = await proxyToNativeGraph(body)
     res.json(result)
   }
 }
