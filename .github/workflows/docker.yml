@@ -1,0 +1,51 @@
+name: Docker
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+# Native exchange-api (TypeScript: src/index.ts -> dist/index.js, /v1/graphql with
+# operation-aware amm/dex routing). Publishes the canonical ghcr.io/luxfi/exchange-api
+# image on v* tags. Multi-arch on luxfi's self-hosted ARC pool; arm64 via QEMU until a
+# native arm64 runner is added. Semver-only — only v* tags produce {{version}} manifests.
+
+jobs:
+  docker:
+    runs-on: [self-hosted, linux, amd64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          driver-opts: network=host
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/luxfi/exchange-api
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=sha,prefix=sha-
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha,scope=exchange-api
+          cache-to: type=gha,scope=exchange-api,mode=max
+          provenance: false
+          push: true
