@@ -4,15 +4,16 @@ import { cacheGet, cacheSet, TTL } from './cache'
 const BLOCKSCOUT_API = process.env.BLOCKSCOUT_API || 'https://api-explore.lux.network'
 
 // Data source is the NATIVE Lux graph engine (luxfi/graph) embedded in the
-// explorer — NOT a hosted The-Graph node and NOT Uniswap's gateway. The engine
-// serves the uniswap-v2/v3-compatible schema (pools, pairs, swaps, tokens,
-// factories, uniswapFactories) from on-chain 0x9999 settlement events. Both
-// versions point at the one `amm` subgraph; V4 swaps surface as both pools and
-// pairs there. Override per-environment via SUBGRAPH_URL / SUBGRAPH_V3_URL.
-const NATIVE_GRAPH = process.env.SUBGRAPH_URL ||
+// explorer — NOT a hosted The-Graph node and NOT Uniswap's gateway. This module
+// queries ONLY the uniswap-v2/v3-compatible `amm` schema (pools, pairs, swaps,
+// tokens, factories) — the native-CLOB `dex` schema (markets/fills) is routed
+// separately by graphql.ts's graphEndpointFor. Both V2/V3 helpers point at the one
+// `amm` subgraph; V4 swaps surface as both pools and pairs there. Override
+// per-environment via SUBGRAPH_URL (same knob graphql.ts reads for AMM_GRAPH).
+const AMM_GRAPH = process.env.SUBGRAPH_URL ||
   'http://explorer.lux-mainnet.svc:8090/v1/graph/cchain/amm/graphql'
-const SUBGRAPH_V2_URL = NATIVE_GRAPH
-const SUBGRAPH_V3_URL = process.env.SUBGRAPH_V3_URL || NATIVE_GRAPH
+const SUBGRAPH_V2_URL = AMM_GRAPH
+const SUBGRAPH_V3_URL = process.env.SUBGRAPH_V3_URL || AMM_GRAPH
 
 export interface BlockscoutToken {
   address_hash: string
