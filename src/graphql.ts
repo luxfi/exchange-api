@@ -4,9 +4,173 @@ import { cacheGet, cacheSet, TTL } from './cache'
 import { getBlockscoutTokens, getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphSwaps, getSubgraphV3Pools, getSubgraphV3Tokens, getV3Bundle, getSubgraphV3Swaps } from './blockscout'
 import { getTokenMeta, LUX_TOKENS } from './lux-tokens'
 
-const UNISWAP_API = process.env.UNISWAP_API || 'https://interface.gateway.uniswap.org/v1/graphql'
+// The native Lux graph engine (luxfi/graph in the explorer) is the single source
+// of truth. It exposes TWO schemas on the SAME host/slug under distinct subgraph
+// paths: `amm` (uniswap-v2/v3-shaped pools/pairs/swaps/tokens/factories) and `dex`
+// (the native CLOB: markets/fills/orders/orderbook). The FE's AMM queries resolve
+// against `amm`; its CLOB/market queries resolve against `dex`. Routing the wrong
+// one returns "unknown field: markets" — the markets-won't-load failure. This
+// REPLACES the dead Uniswap hosted gateway, which returned HTML.
+//
+// AMM_GRAPH is the existing SUBGRAPH_URL knob (the AMM endpoint, default). DEX_GRAPH
+// is derived from it by swapping the subgraph segment (same explorer host + slug),
+// overridable independently. One base, two schema endpoints — no second host config.
+const AMM_GRAPH = process.env.SUBGRAPH_URL ||
+  'http://explorer.lux-mainnet.svc:8090/v1/graph/cchain/amm/graphql'
 
-// Chains we handle natively (everything else proxied to Uniswap)
+// deriveDexGraph resolves the `dex` (CLOB) schema endpoint from the `amm` one. An
+// explicit DEX_SUBGRAPH_URL always wins. Otherwise the dex endpoint is the amm one
+// with the `/amm/graphql` segment swapped for `/dex/graphql` (one base, two schema
+// paths on the same explorer host+slug).
+//
+// FOOTGUN GUARD: if an operator overrides SUBGRAPH_URL to a value that lacks the
+// `/amm/graphql` segment, the swap is a no-op and the dex endpoint silently collapses
+// to the amm one — every CLOB query then routes to the amm schema and fails with
+// "unknown field: markets". Rather than fail opaquely at request time, fail FAST at
+// startup: when the derivation is a no-op and no explicit DEX_SUBGRAPH_URL is set,
+// throw with the exact remedy.
+export function deriveDexGraph(ammGraph: string, explicitDexGraph?: string): string {
+  if (explicitDexGraph) return explicitDexGraph
+  const derived = ammGraph.replace('/amm/graphql', '/dex/graphql')
+  if (derived === ammGraph) {
+    throw new Error(
+      `cannot derive the DEX (CLOB) graph endpoint: SUBGRAPH_URL (${ammGraph}) has no ` +
+        `'/amm/graphql' segment to swap for '/dex/graphql', so the dex endpoint would ` +
+        `collapse to the amm endpoint and every CLOB query would fail ("unknown field: ` +
+        `markets"). Set DEX_SUBGRAPH_URL explicitly, or include '/amm/graphql' in SUBGRAPH_URL.`,
+    )
+  }
+  return derived
+}
+
+const DEX_GRAPH = deriveDexGraph(AMM_GRAPH, process.env.DEX_SUBGRAPH_URL)
+
+// dexRootFields are the root query fields that ONLY the native DEX (CLOB) schema
+// resolves. A query whose LEADING top-level field is one of these routes to
+// DEX_GRAPH; everything else (AMM pools/swaps/tokens/factories, and any raw
+// subgraph query) goes to AMM_GRAPH.
+const dexRootFields = new Set([
+  'markets', 'market', 'fills', 'fill', 'orders', 'order', 'orderbook',
+  'perpPositions', 'perpPosition', 'fundingRates', 'fundingRate',
+  'liquidations', 'liquidation', 'marketDayDatas',
+])
+
+// isNameStart / isNameChar implement the GraphQL Name production /[_A-Za-z][_0-9A-Za-z]*/.
+const isNameStart = (c: string) => /[_A-Za-z]/.test(c)
+const isNameChar = (c: string) => /[_0-9A-Za-z]/.test(c)
+
+// leadRootField returns the name of the FIRST field in the operation's top-level
+// selection set, or null if there is none. It is the routing key: only the leading
+// root field decides amm-vs-dex, so a mixed document `{ pools ... markets ... }`
+// routes by `pools` (its lead root), and trigger words that appear only as NESTED
+// fields, ALIASES' targets aside, inside string literals, or inside comments never
+// mis-route. This replaces a whole-document substring scan, which false-positived on
+// all of the above.
+//
+// The scan skips, in order to find the top-level `{`: `#` comments, `"..."`/`"""..."""`
+// string literals (so trigger words inside them don't count), and a balanced `(...)`
+// variable-definitions group (whose default values may themselves contain `{ }`). The
+// first `{` seen at paren-depth 0 opens the top-level selection set; the first Name
+// token after it is the lead field, unless it is an alias (`alias: field`), in which
+// case the Name after the `:` is the real field. A leading `...` (fragment spread /
+// inline fragment) yields null (routed to the AMM default).
+export function leadRootField(query: string): string | null {
+  const n = query.length
+  let i = 0
+  let parenDepth = 0
+  let inSelectionSet = false
+
+  const skipString = () => {
+    if (query.startsWith('"""', i)) {
+      i += 3
+      while (i < n && !query.startsWith('"""', i)) i++
+      i += 3
+      return
+    }
+    i++ // opening quote
+    while (i < n && query[i] !== '"') {
+      if (query[i] === '\\') i++ // skip escaped char
+      i++
+    }
+    i++ // closing quote
+  }
+
+  const readName = (): string => {
+    const start = i
+    i++ // first char already known to be a name start
+    while (i < n && isNameChar(query[i])) i++
+    return query.slice(start, i)
+  }
+
+  // Phase 1: advance to the top-level selection-set opener `{` (paren-depth 0).
+  while (i < n && !inSelectionSet) {
+    const c = query[i]
+    if (c === '#') {
+      while (i < n && query[i] !== '\n') i++
+    } else if (c === '"') {
+      skipString()
+    } else if (c === '(') {
+      parenDepth++
+      i++
+    } else if (c === ')') {
+      if (parenDepth > 0) parenDepth--
+      i++
+    } else if (c === '{' && parenDepth === 0) {
+      inSelectionSet = true
+      i++
+    } else {
+      i++
+    }
+  }
+  if (!inSelectionSet) return null
+
+  // Phase 2: read the first field name in the top-level selection set, skipping
+  // comments/strings/whitespace; resolve an `alias: field` to `field`.
+  let firstName: string | null = null
+  while (i < n) {
+    const c = query[i]
+    if (c === '#') {
+      while (i < n && query[i] !== '\n') i++
+    } else if (c === '"') {
+      skipString()
+    } else if (c === '.') {
+      // A leading `...` (fragment spread / inline fragment) is not a routable field.
+      return null
+    } else if (isNameStart(c)) {
+      const name = readName()
+      if (firstName === null) {
+        firstName = name
+        continue // peek ahead for an alias colon
+      }
+      // We already have a candidate and just read a SECOND name without an
+      // intervening colon — the first was the real field (no alias).
+      return firstName
+    } else if (c === ':') {
+      // The name we read was an alias; the real field is the next Name token.
+      firstName = null
+      i++
+    } else {
+      // Any other punctuation (e.g. `(`, `{`, `@`) terminates the field name —
+      // whatever we have is the lead field.
+      if (firstName !== null) return firstName
+      i++
+    }
+  }
+  return firstName
+}
+
+// graphEndpointFor selects the native-graph schema endpoint for a GraphQL body by
+// the LEADING root field of its top-level selection set (see leadRootField). The
+// decision is a pure function of the query text and two SERVER-SIDE constants — the
+// client never supplies the target URL, so this cannot be turned into an SSRF/
+// open-proxy (the SSRF-safety the verbatim forwarder already had is preserved).
+export function graphEndpointFor(body: any): string {
+  const root = leadRootField(body?.query || '')
+  return root !== null && dexRootFields.has(root) ? DEX_GRAPH : AMM_GRAPH
+}
+
+// Chains we special-case with shaped Token/V2Pair/V3Pool responses. Everything
+// else (and raw subgraph queries) is forwarded to the native graph as-is.
 const NATIVE_CHAINS = new Set(['LUX', 'ZOO'])
 
 function isNativeChainQuery(body: any): string | null {
@@ -26,28 +190,33 @@ function extractOperationName(body: any): string {
   return match?.[1] || 'unknown'
 }
 
-// Proxy to Uniswap API with caching
-async function proxyToUniswap(body: any): Promise<any> {
-  const cacheKey = `uniswap:${JSON.stringify(body)}`
+// Forward a GraphQL body verbatim to the native graph engine, routed to the schema
+// (amm vs dex) that resolves the query's root fields (see graphEndpointFor). Only the
+// query + variables are forwarded — never client headers — and the target is one of
+// two fixed server-side constants, so this cannot be turned into an SSRF/open-proxy.
+async function proxyToNativeGraph(body: any): Promise<any> {
+  const endpoint = graphEndpointFor(body)
+  // Endpoint-scoped cache key: amm and dex must never share a cache entry even for
+  // an identical body (they resolve different schemas).
+  const cacheKey = `native:${endpoint}:${JSON.stringify(body)}`
   const cached = cacheGet(cacheKey)
   if (cached) return cached
 
   try {
-    const res = await fetch(UNISWAP_API, {
+    const res = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Origin': 'https://app.uniswap.org',
-      },
-      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: body?.query, variables: body?.variables }),
       signal: AbortSignal.timeout(15000),
     })
     const data = await res.json()
     cacheSet(cacheKey, data, TTL.PROXY)
     return data
   } catch (e) {
-    console.error('Uniswap proxy failed:', e)
-    return { data: null, errors: [{ message: 'Upstream API unavailable' }] }
+    console.error('Native graph query failed:', e)
+    // Fail typed-empty, never with a dead-upstream error string. The FE renders
+    // an empty market list rather than an error toast.
+    return { data: null }
   }
 }
 
@@ -344,9 +513,10 @@ export async function handleGraphQL(req: Request, res: Response): Promise<void> 
   const opName = extractOperationName(body)
   const nativeChain = isNativeChainQuery(body)
 
-  // If not a Lux/Zoo query, proxy to Uniswap
+  // Not a special-cased Lux/Zoo operation (or a raw subgraph query): forward to
+  // the native graph engine, which resolves uniswap-v2/v3-shaped fields directly.
   if (!nativeChain) {
-    const result = await proxyToUniswap(body)
+    const result = await proxyToNativeGraph(body)
     res.json(result)
     return
   }
@@ -392,17 +562,17 @@ export async function handleGraphQL(req: Request, res: Response): Promise<void> 
         break
 
       default:
-        // For unhandled native queries, try proxy as fallback
-        console.log(`[native] unhandled op=${opName}, proxying to Uniswap`)
-        result = await proxyToUniswap(body)
+        // Unhandled named op — forward to the native graph engine.
+        console.log(`[native] unhandled op=${opName}, forwarding to native graph`)
+        result = await proxyToNativeGraph(body)
         break
     }
 
     res.json(result)
   } catch (e) {
     console.error(`[native] error handling ${opName}:`, e)
-    // Fallback to proxy on error
-    const result = await proxyToUniswap(body)
+    // Fall back to the native graph on error, never to a dead external proxy.
+    const result = await proxyToNativeGraph(body)
     res.json(result)
   }
 }
