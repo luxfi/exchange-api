@@ -4,14 +4,42 @@ import { cacheGet, cacheSet, TTL } from './cache'
 import { getBlockscoutTokens, getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphSwaps, getSubgraphV3Pools, getSubgraphV3Tokens, getV3Bundle, getSubgraphV3Swaps } from './blockscout'
 import { getTokenMeta, LUX_TOKENS } from './lux-tokens'
 
-// The native Lux graph engine (luxfi/graph in the explorer) is the single
-// source of truth. Raw subgraph queries (Trade page: { pools swaps poolDayDatas
-// ... }) and any operation we don't special-case are forwarded here verbatim —
-// the engine resolves uniswap-v2/v3-shaped fields directly. This REPLACES the
-// dead Uniswap hosted gateway, which returned HTML and produced the
-// "Upstream API unavailable" markets failure.
-const NATIVE_GRAPH = process.env.SUBGRAPH_URL ||
+// The native Lux graph engine (luxfi/graph in the explorer) is the single source
+// of truth. It exposes TWO schemas on the SAME host/slug under distinct subgraph
+// paths: `amm` (uniswap-v2/v3-shaped pools/pairs/swaps/tokens/factories) and `dex`
+// (the native CLOB: markets/fills/orders/orderbook). The FE's AMM queries resolve
+// against `amm`; its CLOB/market queries resolve against `dex`. Routing the wrong
+// one returns "unknown field: markets" — the markets-won't-load failure. This
+// REPLACES the dead Uniswap hosted gateway, which returned HTML.
+//
+// AMM_GRAPH is the existing SUBGRAPH_URL knob (the AMM endpoint, default). DEX_GRAPH
+// is derived from it by swapping the subgraph segment (same explorer host + slug),
+// overridable independently. One base, two schema endpoints — no second host config.
+const AMM_GRAPH = process.env.SUBGRAPH_URL ||
   'http://explorer.lux-mainnet.svc:8090/v1/graph/cchain/amm/graphql'
+const DEX_GRAPH = process.env.DEX_SUBGRAPH_URL ||
+  AMM_GRAPH.replace('/amm/graphql', '/dex/graphql')
+
+// dexRootFields are the root query fields that ONLY the native DEX (CLOB) schema
+// resolves. A query asking for any of them must be routed to DEX_GRAPH; everything
+// else (AMM pools/swaps/tokens/factories, and any raw subgraph query) goes to
+// AMM_GRAPH. Matched as whole words so a substring (e.g. "marketCap") never trips it.
+const dexRootFields = [
+  'markets', 'market', 'fills', 'fill', 'orders', 'order', 'orderbook',
+  'perpPositions', 'perpPosition', 'fundingRates', 'fundingRate',
+  'liquidations', 'liquidation', 'marketDayDatas',
+]
+const dexRootRe = new RegExp(`\\b(?:${dexRootFields.join('|')})\\b`)
+
+// graphEndpointFor selects the native-graph schema endpoint for a GraphQL body by
+// inspecting which root fields the query requests. The decision is a pure function
+// of the query text and two SERVER-SIDE constants — the client never supplies the
+// target URL, so this cannot be turned into an SSRF/open-proxy (the SSRF-safety the
+// verbatim forwarder already had is preserved).
+export function graphEndpointFor(body: any): string {
+  const q: string = body?.query || ''
+  return dexRootRe.test(q) ? DEX_GRAPH : AMM_GRAPH
+}
 
 // Chains we special-case with shaped Token/V2Pair/V3Pool responses. Everything
 // else (and raw subgraph queries) is forwarded to the native graph as-is.
@@ -34,17 +62,20 @@ function extractOperationName(body: any): string {
   return match?.[1] || 'unknown'
 }
 
-// Forward a GraphQL body verbatim to the native graph engine. The engine speaks
-// the uniswap-v2/v3 schema, so the FE's raw queries resolve unchanged. Only the
-// query + variables are forwarded — never client headers — so this cannot be
-// turned into an SSRF/open-proxy: the target URL is fixed server-side config.
+// Forward a GraphQL body verbatim to the native graph engine, routed to the schema
+// (amm vs dex) that resolves the query's root fields (see graphEndpointFor). Only the
+// query + variables are forwarded — never client headers — and the target is one of
+// two fixed server-side constants, so this cannot be turned into an SSRF/open-proxy.
 async function proxyToNativeGraph(body: any): Promise<any> {
-  const cacheKey = `native:${JSON.stringify(body)}`
+  const endpoint = graphEndpointFor(body)
+  // Endpoint-scoped cache key: amm and dex must never share a cache entry even for
+  // an identical body (they resolve different schemas).
+  const cacheKey = `native:${endpoint}:${JSON.stringify(body)}`
   const cached = cacheGet(cacheKey)
   if (cached) return cached
 
   try {
-    const res = await fetch(NATIVE_GRAPH, {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: body?.query, variables: body?.variables }),
