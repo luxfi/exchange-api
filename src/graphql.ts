@@ -281,8 +281,21 @@ async function handleTopTokens(chain: string): Promise<any> {
   const [v3Bundle, v2Bundle] = await Promise.all([getV3Bundle(), getBundle()])
   const ethPrice = v3Bundle ? parseFloat(v3Bundle.ethPriceUSD) : (v2Bundle ? parseFloat(v2Bundle.ethPrice) : 0)
 
-  // Get tokens from both V2 and V3 subgraphs
-  const [v2Tokens, v3Tokens] = await Promise.all([getSubgraphTokens(100), getSubgraphV3Tokens(100)])
+  // Get tokens + pairs/pools from both V2 and V3 subgraphs
+  const [v2Tokens, v3Tokens, v2Pairs, v3Pools] = await Promise.all([
+    getSubgraphTokens(100), getSubgraphV3Tokens(100),
+    getSubgraphPairs(200), getSubgraphV3Pools(200),
+  ])
+
+  // A token is swappable iff it is token0/token1 of a real pair/pool. This
+  // excludes the LP/pair tokens themselves (UNI-V2), the V3 positions NFT, and
+  // vault tokens — the indexer records those as ERC20 "tokens" too, but they
+  // must never appear in a swap selector.
+  const tradeable = new Set<string>()
+  for (const p of [...v2Pairs, ...v3Pools]) {
+    if (p.token0?.id) tradeable.add(p.token0.id.toLowerCase())
+    if (p.token1?.id) tradeable.add(p.token1.id.toLowerCase())
+  }
 
   // Merge tokens by address (V3 data takes priority, higher volume)
   const tokenMap = new Map<string, any>()
@@ -296,7 +309,10 @@ async function handleTopTokens(chain: string): Promise<any> {
     }
   }
 
+  // Keep only swappable tokens. Skip the filter entirely when pairs are
+  // unavailable, so a subgraph hiccup degrades to "show all", never "show none".
   const mergedTokens = Array.from(tokenMap.values())
+    .filter(t => tradeable.size === 0 || tradeable.has(t.id.toLowerCase()))
 
   if (mergedTokens.length > 0) {
     const tokens = mergedTokens.map(t => {
