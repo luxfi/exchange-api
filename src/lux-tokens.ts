@@ -169,6 +169,12 @@ export const ZOO_TOKENS: TokenMeta[] = [
   },
 ]
 
+// Native LUX (the zero sentinel on chainId 96369). Exported explicitly because the
+// generic address map below collides at 0x0..0 (both LUX and ZOO use the sentinel for
+// their native coin); a sentinel lookup is therefore ambiguous and must NOT be used to
+// resolve native LUX. The trading API is C-Chain-only, where native == LUX.
+export const LUX_NATIVE: TokenMeta = LUX_TOKENS[0]
+
 const tokensByAddress = new Map<string, TokenMeta>()
 for (const t of [...LUX_TOKENS, ...ZOO_TOKENS]) {
   tokensByAddress.set(t.address.toLowerCase(), t)
