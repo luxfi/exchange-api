@@ -1,8 +1,6 @@
 import fetch from 'node-fetch'
 import { cacheGet, cacheSet, TTL } from './cache'
 
-const BLOCKSCOUT_API = process.env.BLOCKSCOUT_API || 'https://api-explore.lux.network'
-
 // Data source is the NATIVE Lux graph engine (luxfi/graph) embedded in the
 // explorer — NOT a hosted The-Graph node and NOT Uniswap's gateway. This module
 // queries ONLY the uniswap-v2/v3-compatible `amm` schema (pools, pairs, swaps,
@@ -14,61 +12,6 @@ const AMM_GRAPH = process.env.SUBGRAPH_URL ||
   'http://explorer.lux-mainnet.svc:8090/v1/graph/cchain/amm/graphql'
 const SUBGRAPH_V2_URL = AMM_GRAPH
 const SUBGRAPH_V3_URL = process.env.SUBGRAPH_V3_URL || AMM_GRAPH
-
-export interface BlockscoutToken {
-  address_hash: string
-  name: string
-  symbol: string
-  decimals: string
-  exchange_rate: string | null
-  holders_count: number
-  total_supply: string
-  volume_24h: string | null
-  icon_url: string | null
-  type: string
-}
-
-export async function getBlockscoutTokens(): Promise<BlockscoutToken[]> {
-  const cacheKey = 'blockscout:tokens'
-  const cached = cacheGet(cacheKey)
-  if (cached) return cached
-
-  try {
-    const res = await fetch(`${BLOCKSCOUT_API}/api/v2/tokens?type=ERC-20`, {
-      signal: AbortSignal.timeout(5000),
-    })
-    const data = await res.json() as any
-    const tokens = (data.items || []) as BlockscoutToken[]
-    cacheSet(cacheKey, tokens, TTL.MEDIUM)
-    return tokens
-  } catch (e) {
-    console.error('Blockscout tokens fetch failed:', e)
-    return []
-  }
-}
-
-export async function getBlockscoutToken(address: string): Promise<BlockscoutToken | null> {
-  const tokens = await getBlockscoutTokens()
-  return tokens.find(t => t.address_hash?.toLowerCase() === address.toLowerCase()) || null
-}
-
-export async function getBlockscoutStats(): Promise<any> {
-  const cacheKey = 'blockscout:stats'
-  const cached = cacheGet(cacheKey)
-  if (cached) return cached
-
-  try {
-    const res = await fetch(`${BLOCKSCOUT_API}/api/v2/stats`, {
-      signal: AbortSignal.timeout(5000),
-    })
-    const data = await res.json()
-    cacheSet(cacheKey, data, TTL.SHORT)
-    return data
-  } catch (e) {
-    console.error('Blockscout stats fetch failed:', e)
-    return null
-  }
-}
 
 // Query a subgraph endpoint
 async function querySubgraphUrl(url: string, query: string, variables?: Record<string, any>): Promise<any> {

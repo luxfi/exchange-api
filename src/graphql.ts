@@ -1,7 +1,7 @@
 import { Request, Response } from 'express'
 import fetch from 'node-fetch'
 import { cacheGet, cacheSet, TTL } from './cache'
-import { getBlockscoutTokens, getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphSwaps, getSubgraphV3Pools, getSubgraphV3Tokens, getV3Bundle, getSubgraphV3Swaps } from './blockscout'
+import { getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphSwaps, getSubgraphV3Pools, getSubgraphV3Tokens, getV3Bundle, getSubgraphV3Swaps } from './subgraph'
 import { getTokenMeta, LUX_TOKENS } from './lux-tokens'
 
 // The native Lux graph engine (luxfi/graph in the explorer) is the single source
@@ -330,19 +330,19 @@ async function handleTopTokens(chain: string): Promise<any> {
     return { data: { topTokens: [nativeLux, ...tokens] } }
   }
 
-  // Fallback: use Blockscout + known token list
-  const blockscoutTokens = await getBlockscoutTokens()
-  const tokens = LUX_TOKENS.map(t => {
-    const bs = blockscoutTokens.find(b => b.address_hash?.toLowerCase() === t.address.toLowerCase())
-    return buildTokenResponse(t.address, chain, {
+  // Fallback when the native graph has not indexed tokens yet: the curated
+  // LUX_TOKENS list. The native graph is the only volume/price source, so
+  // these surface unpriced until it indexes them.
+  const tokens = LUX_TOKENS.map(t =>
+    buildTokenResponse(t.address, chain, {
       symbol: t.symbol,
       name: t.name,
       decimals: t.decimals,
       logoUrl: t.logoUrl,
-      volumeUSD: bs?.volume_24h || '0',
+      volumeUSD: '0',
       ethPrice,
-    })
-  })
+    }),
+  )
 
   return { data: { topTokens: tokens } }
 }
@@ -369,21 +369,19 @@ async function handleToken(chain: string, address: string | null): Promise<any> 
   }
 
   const meta = getTokenMeta(address)
-  const blockscoutTokens = await getBlockscoutTokens()
-  const bs = blockscoutTokens.find(t => t.address_hash?.toLowerCase() === address.toLowerCase())
   const subgraphTokens = await getSubgraphTokens(100)
   const sg = subgraphTokens.find(t => t.id.toLowerCase() === address.toLowerCase())
 
   return {
     data: {
       token: buildTokenResponse(address, chain, {
-        symbol: sg?.symbol || bs?.symbol || meta?.symbol || 'UNKNOWN',
-        name: sg?.name || bs?.name || meta?.name || 'Unknown Token',
+        symbol: sg?.symbol || meta?.symbol || 'UNKNOWN',
+        name: sg?.name || meta?.name || 'Unknown Token',
         decimals: sg ? parseInt(sg.decimals) : meta?.decimals || 18,
         derivedETH: sg?.derivedETH || '0',
-        volumeUSD: sg?.tradeVolumeUSD || bs?.volume_24h || '0',
+        volumeUSD: sg?.tradeVolumeUSD || '0',
         totalLiquidity: sg?.totalLiquidity || '0',
-        logoUrl: meta?.logoUrl || bs?.icon_url || null,
+        logoUrl: meta?.logoUrl || null,
         ethPrice,
       }),
     },

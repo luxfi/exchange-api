@@ -1,5 +1,5 @@
 // Known Lux mainnet tokens with metadata
-// All addresses are bridge-era (verified on-chain via Blockscout)
+// All addresses are bridge-era (verified on-chain via the Lux explorer)
 
 export interface TokenMeta {
   address: string
