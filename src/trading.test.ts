@@ -70,12 +70,19 @@ async function graphReachable(): Promise<boolean> {
 
 // ── swappable_tokens ──────────────────────────────────────────────────────────
 
-test('swappable_tokens: foreign chainId returns empty tokens + a requestId (not an error)', async () => {
+test('LIVE swappable_tokens: chainId param does not gate the single-chain Lux token set', async () => {
+  if (!(await graphReachable())) return
   const { res, captured } = mockRes()
   await handleSwappableTokens(mockReq({ query: { tokenInChainId: '1' } }), res)
   assert.equal(captured.status, 200)
   assert.ok(typeof captured.body.requestId === 'string')
-  assert.deepEqual(captured.body.tokens, [])
+  const tokens = captured.body.tokens as any[]
+  // Single-chain venue: a transient/foreign chainId still yields the Lux tokens,
+  // each carrying its real chainId 96369 — never an empty list (which the FE shows
+  // as "Couldn't load tokens").
+  assert.ok(Array.isArray(tokens) && tokens.length > 1, 'chainId=1 must still return the Lux set')
+  assert.equal(tokens[0].symbol, 'LUX')
+  assert.ok(tokens.every((t) => t.chainId === 96369), 'every token carries chainId 96369')
 })
 
 test('LIVE swappable_tokens: native LUX first, includes CYRUS, every decimals is a number', async () => {

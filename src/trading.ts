@@ -128,15 +128,15 @@ function nativeSwappableToken(): SwappableToken {
 export async function handleSwappableTokens(req: Request, res: Response): Promise<void> {
   try {
     const chainIdRaw = req.query.tokenInChainId
-    if (chainIdRaw !== undefined) {
-      const chainId = parseInt(String(chainIdRaw), 10)
-      if (Number.isNaN(chainId)) return badRequest(res, 'tokenInChainId must be a number')
-      // Only chainId 96369 is served. Any other chain → empty token list (not an error).
-      if (chainId !== CHAIN_ID) {
-        res.json({ requestId: randomUUID(), tokens: [] })
-        return
-      }
+    if (chainIdRaw !== undefined && Number.isNaN(parseInt(String(chainIdRaw), 10))) {
+      return badRequest(res, 'tokenInChainId must be a number')
     }
+    // LX_API is a single-chain trading API: its token universe is the Lux C-Chain
+    // (96369) pool set, full stop. The Uniswap interface prefetches swappable_tokens
+    // with whatever chain the swap form currently holds — which can transiently be a
+    // generic default before the brand config resolves the chain. Serving our tokens
+    // (every token carries its real chainId: 96369) keeps the selector populated
+    // instead of erroring; cross-chain semantics don't apply to a one-chain venue.
 
     const discovered = await discoverTradeableTokens()
 
