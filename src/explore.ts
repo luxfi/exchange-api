@@ -24,7 +24,10 @@
 // with the matching HTTP status.
 
 import type { Request, Response } from 'express'
+import type { Address } from 'viem'
 import { getRankedTokens, type RankedToken } from './subgraph'
+import { bestRoute, toWrapped } from './dexRouter'
+import { cacheGet, cacheSet, TTL } from './cache'
 
 // Connect's package.Service/Method path. Matches the generated typeName
 // `uniswap.explore.v1.ExploreStatsService` + rpc `TokenRankings`.
@@ -181,4 +184,146 @@ export async function handleTokenRankings(req: Request, res: Response): Promise<
     console.error('[explore] TokenRankings:', e)
     connectError(res, 'internal', 'Internal server error')
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ExploreStats + ProtocolStats — the explore page's token/pool tables and the
+// protocol TVL/volume charts. Same ExploreStatsService, same Connect-RPC JSON
+// transport as TokenRankings; the FE reaches them via useExploreStatsQuery /
+// useProtocolStatsQuery (apiBaseUrlV2 → this service). Without these two the
+// explore page calls 404 and renders empty.
+//
+// tokenStats is the primary view: the curated, swappable Lux tokens (from
+// getRankedTokens — names/logos/decimals) priced in USD on-chain by quoting one
+// whole unit → LUSD through the SAME QuoterV2 path the swap uses, since the native
+// graph indexes no USD price/TVL. Pool TVL/volume and the protocol time-series are
+// not derivable from the native graph yet (it indexes a stale V2 deployment, not
+// the live V3 pools the swap trades), so poolStats and the charts are returned
+// empty rather than wrong — the token table is correct and real, the rest degrades
+// cleanly. (When the graph indexes the live V3 deployment with TVL, fill poolStats
+// from getSubgraphV3Pools + the protocol series from pool/token day data here.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const EXPLORE_STATS_PATH = '/uniswap.explore.v1.ExploreStatsService/ExploreStats'
+export const PROTOCOL_STATS_PATH = '/uniswap.explore.v1.ExploreStatsService/ProtocolStats'
+
+const LUSD_ADDRESS = '0x848Cff46eb323f323b6Bbe1Df274E40793d7f2c2'
+const STABLE = new Set(['USDT', 'USDC', 'LUSD', 'DAI', 'BUSD'])
+
+// USD price of one whole token: stablecoins pin to $1; everything else is the
+// amount of LUSD (= $1) that one unit swaps to, via the same on-chain router the
+// trading-api quotes through. 0 when no route exists (the FE renders "-").
+async function priceTokenUsd(addr: string, decimals: number, symbol: string): Promise<number> {
+  if (STABLE.has(symbol.toUpperCase())) return 1
+  if (!Number.isFinite(decimals) || decimals < 0) return 0
+  try {
+    const wrapped = toWrapped(addr) // native LUX / WLUX → WLUX
+    if (wrapped.toLowerCase() === LUSD_ADDRESS.toLowerCase()) return 1
+    const oneUnit = 10n ** BigInt(decimals)
+    const route = await bestRoute(wrapped, LUSD_ADDRESS as Address, oneUnit, 'EXACT_INPUT')
+    if (!route || route.amountOut <= 0n) return 0
+    return Number(route.amountOut) / 1e18 // LUSD has 18 decimals
+  } catch {
+    return 0
+  }
+}
+
+// RankedToken → TokenStats (proto3 JSON, camelCase). chain is the GraphQL enum
+// string "LUX". price/volume omitted when zero (optional Amount fields).
+function toTokenStats(t: RankedToken, priceUSD: number): Record<string, unknown> {
+  const stat: Record<string, unknown> = {
+    chain: LUX_CHAIN,
+    address: t.address,
+    name: t.name,
+    symbol: t.symbol,
+    decimals: t.decimals,
+    standard: t.address === NATIVE_SENTINEL ? 'NATIVE' : 'ERC20',
+  }
+  if (t.logoUrl) {
+    stat.logo = t.logoUrl
+    stat.project = { name: t.name, logo: t.logoUrl, logoUrl: t.logoUrl }
+  }
+  if (priceUSD > 0) stat.price = usd(priceUSD)
+  if (t.volumeUSD > 0) stat.volume1Day = usd(t.volumeUSD)
+  return stat
+}
+
+const EMPTY_TVL = { v2: [], v3: [], v4: [] }
+const EMPTY_VOLUME_SPLIT = { v2: [], v3: [], v4: [] }
+const EMPTY_HISTORICAL_VOLUME = { Month: EMPTY_VOLUME_SPLIT, Year: EMPTY_VOLUME_SPLIT, Max: EMPTY_VOLUME_SPLIT }
+
+function emptyExploreStats(): Record<string, unknown> {
+  return {
+    stats: {
+      tokenStats: [],
+      poolStats: [],
+      poolStatsV3: [],
+      transactionStats: [],
+      dailyProtocolTvl: EMPTY_TVL,
+      historicalProtocolVolume: EMPTY_HISTORICAL_VOLUME,
+      topTokens: { hourly: [], daily: [] },
+    },
+  }
+}
+
+export async function handleExploreStats(req: Request, res: Response): Promise<void> {
+  if (req.method === 'GET' && req.query.encoding !== undefined && req.query.encoding !== 'json') {
+    return connectError(res, 'unimplemented', `encoding ${String(req.query.encoding)} not supported; use json`)
+  }
+  const parsed = parseRankingsRequest(req)
+  if ('error' in parsed) {
+    return connectError(res, 'invalid_argument', parsed.error)
+  }
+
+  try {
+    if (!chainIsServed(parsed.value.chainId)) {
+      res.json(emptyExploreStats())
+      return
+    }
+
+    const cacheKey = 'explore:stats'
+    const cached = cacheGet(cacheKey) as Record<string, unknown> | null
+    if (cached) {
+      res.json(cached)
+      return
+    }
+
+    const ranked = await getRankedTokens()
+    // Enrich each token with an on-chain USD price (one unit → LUSD). Parallel;
+    // priceTokenUsd never throws, so a dead route degrades that token to 0.
+    const prices = await Promise.all(
+      ranked.map((t) => (t.priceUSD > 0 ? Promise.resolve(t.priceUSD) : priceTokenUsd(t.address, t.decimals, t.symbol))),
+    )
+    const tokenStats = ranked.map((t, i) => toTokenStats(t, prices[i]))
+
+    const response = {
+      stats: {
+        tokenStats,
+        poolStats: [],
+        poolStatsV3: [],
+        transactionStats: [],
+        dailyProtocolTvl: EMPTY_TVL,
+        historicalProtocolVolume: EMPTY_HISTORICAL_VOLUME,
+        topTokens: { hourly: [], daily: tokenStats },
+      },
+    }
+    cacheSet(cacheKey, response, TTL.SHORT)
+    res.json(response)
+  } catch (e) {
+    console.error('[explore] ExploreStats:', e)
+    connectError(res, 'internal', 'Internal server error')
+  }
+}
+
+export async function handleProtocolStats(req: Request, res: Response): Promise<void> {
+  if (req.method === 'GET' && req.query.encoding !== undefined && req.query.encoding !== 'json') {
+    return connectError(res, 'unimplemented', `encoding ${String(req.query.encoding)} not supported; use json`)
+  }
+  const parsed = parseRankingsRequest(req)
+  if ('error' in parsed) {
+    return connectError(res, 'invalid_argument', parsed.error)
+  }
+  // No protocol-level TVL/volume time series on the native graph yet; return the
+  // empty (well-formed) envelope so the charts render flat instead of erroring.
+  res.json({ dailyProtocolTvl: EMPTY_TVL, historicalProtocolVolume: EMPTY_HISTORICAL_VOLUME })
 }
