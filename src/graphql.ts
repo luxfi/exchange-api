@@ -477,10 +477,55 @@ async function handleTransactions(chain: string): Promise<any> {
   return { data: { v2Transactions: txs } }
 }
 
+// tokenProjectsFor builds a Uniswap `tokenProjects` payload for the requested contracts,
+// including only those that resolve to a known Lux token (by address). Non-Lux contracts
+// (ETHEREUM/POLYGON/…) yield no project — the LX_API serves only Lux-ecosystem tokens.
+function tokenProjectsFor(contracts: Array<{ chain?: string; address?: string }> | undefined): any[] {
+  const out: any[] = []
+  for (const c of contracts || []) {
+    const addr = (c?.address || '').toLowerCase()
+    if (!addr) continue
+    const meta = getTokenMeta(addr)
+    if (!meta) continue
+    const id = `LUX_${meta.address}`
+    const project = { __typename: 'TokenProject', id: `${id}_project`, logoUrl: meta.logoUrl || null, safetyLevel: 'VERIFIED', isSpam: false }
+    out.push({
+      ...project,
+      name: meta.name,
+      tokens: [
+        {
+          __typename: 'Token',
+          id,
+          chain: 'LUX',
+          address: meta.address,
+          decimals: meta.decimals,
+          name: meta.name,
+          symbol: meta.symbol,
+          standard: 'ERC20',
+          project,
+        },
+      ],
+    })
+  }
+  return out
+}
+
 export async function handleGraphQL(req: Request, res: Response): Promise<void> {
   const body = req.body
   const opName = extractOperationName(body)
   const nativeChain = isNativeChainQuery(body)
+
+  // Uniswap data-api ops the native explorer graph cannot resolve (it has no
+  // `tokenProjects` field). The request carries its own per-contract chain, so this is
+  // chain-agnostic and must be answered here REGARDLESS of isNativeChainQuery —
+  // forwarding it yields "unknown field: tokenProjects" and breaks the token selector's
+  // common-bases section. The LX_API only knows Lux-ecosystem tokens, so it returns a
+  // project for each requested contract that resolves to a known Lux token, omitting
+  // the rest (non-Lux contracts simply have no project here).
+  if (opName === 'TokenProjects' || opName === 'TokenProject') {
+    res.json({ data: { tokenProjects: tokenProjectsFor(body?.variables?.contracts) } })
+    return
+  }
 
   // Not a special-cased Lux/Zoo operation (or a raw subgraph query): forward to
   // the native graph engine, which resolves uniswap-v2/v3-shaped fields directly.
