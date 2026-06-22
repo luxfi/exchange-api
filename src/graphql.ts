@@ -1,8 +1,8 @@
 import { Request, Response } from 'express'
 import fetch from 'node-fetch'
 import { cacheGet, cacheSet, TTL } from './cache'
-import { getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphSwaps, getSubgraphV3Pools, getSubgraphV3Tokens, getV3Bundle, getSubgraphV3Swaps } from './subgraph'
-import { getTokenMeta, LUX_TOKENS } from './lux-tokens'
+import { getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphSwaps, getSubgraphV3Pools, getV3Bundle, getSubgraphV3Swaps, getRankedTokens } from './subgraph'
+import { getTokenMeta } from './lux-tokens'
 
 // The native Lux graph engine (luxfi/graph in the explorer) is the single source
 // of truth. It exposes TWO schemas on the SAME host/slug under distinct subgraph
@@ -220,7 +220,49 @@ async function proxyToNativeGraph(body: any): Promise<any> {
   }
 }
 
-// Build a Uniswap-schema Token response from our data
+// tokenResponseFromUsd builds the Uniswap-schema Token from ALREADY-DERIVED USD
+// values. This is the single shaper; buildTokenResponse (subgraph-row inputs) and
+// handleTopTokens (RankedToken inputs) both funnel through here so the output
+// shape lives once.
+function tokenResponseFromUsd(address: string, chain: string, v: {
+  symbol: string
+  name: string
+  decimals: number
+  priceUSD: number
+  volumeUSD: number
+  tvlUSD: number
+  logoUrl?: string | null
+}): any {
+  const id = `${chain}_${address}`
+  return {
+    __typename: 'Token',
+    id,
+    address: address === '0x0000000000000000000000000000000000000000' ? null : address,
+    chain,
+    symbol: v.symbol,
+    name: v.name,
+    decimals: v.decimals,
+    standard: 'ERC20',
+    market: {
+      __typename: 'TokenMarket',
+      id: `${id}_market`,
+      totalValueLocked: { __typename: 'Amount', id: `${id}_tvl`, value: v.tvlUSD, currency: 'USD' },
+      price: { __typename: 'Amount', id: `${id}_price`, value: v.priceUSD, currency: 'USD' },
+      pricePercentChange: { __typename: 'Amount', id: `${id}_pct`, currency: 'USD', value: 0 },
+      volume: { __typename: 'Amount', id: `${id}_vol`, value: v.volumeUSD, currency: 'USD' },
+      priceHistory: [],
+    },
+    project: {
+      __typename: 'TokenProject',
+      id: `${id}_project`,
+      logoUrl: v.logoUrl || null,
+      safetyLevel: 'VERIFIED',
+    },
+  }
+}
+
+// Build a Uniswap-schema Token response from raw subgraph-row data (derivedETH +
+// ethPrice → USD). Used by the per-token / per-pool shapers.
 function buildTokenResponse(address: string, chain: string, opts: {
   symbol?: string
   name?: string
@@ -231,7 +273,6 @@ function buildTokenResponse(address: string, chain: string, opts: {
   logoUrl?: string | null
   ethPrice?: number
 } = {}): any {
-  const id = `${chain}_${address}`
   const ethPrice = opts.ethPrice || 0
   const derivedETH = parseFloat(opts.derivedETH || '0')
 
@@ -248,118 +289,32 @@ function buildTokenResponse(address: string, chain: string, opts: {
   let tvlUSD = parseFloat(opts.totalLiquidity || '0')
   if (tvlUSD > 1e12) tvlUSD = 0
 
-  return {
-    __typename: 'Token',
-    id,
-    address: address === '0x0000000000000000000000000000000000000000' ? null : address,
-    chain,
+  return tokenResponseFromUsd(address, chain, {
     symbol: opts.symbol || 'UNKNOWN',
     name: opts.name || 'Unknown Token',
     decimals: opts.decimals || 18,
-    standard: 'ERC20',
-    market: {
-      __typename: 'TokenMarket',
-      id: `${id}_market`,
-      totalValueLocked: { __typename: 'Amount', id: `${id}_tvl`, value: tvlUSD, currency: 'USD' },
-      price: { __typename: 'Amount', id: `${id}_price`, value: priceUSD, currency: 'USD' },
-      pricePercentChange: { __typename: 'Amount', id: `${id}_pct`, currency: 'USD', value: 0 },
-      volume: { __typename: 'Amount', id: `${id}_vol`, value: volumeUSD, currency: 'USD' },
-      priceHistory: [],
-    },
-    project: {
-      __typename: 'TokenProject',
-      id: `${id}_project`,
-      logoUrl: opts.logoUrl || null,
-      safetyLevel: 'VERIFIED',
-    },
-  }
+    priceUSD,
+    volumeUSD,
+    tvlUSD,
+    logoUrl: opts.logoUrl,
+  })
 }
 
-// Handle topTokens query for Lux/Zoo
+// Handle topTokens query for Lux/Zoo. Projects the shared ranked-token primitive
+// (native LUX first, then volume desc) into the GraphQL topTokens shape.
 async function handleTopTokens(chain: string): Promise<any> {
-  // Try V3 bundle first (more active), fallback to V2
-  const [v3Bundle, v2Bundle] = await Promise.all([getV3Bundle(), getBundle()])
-  const ethPrice = v3Bundle ? parseFloat(v3Bundle.ethPriceUSD) : (v2Bundle ? parseFloat(v2Bundle.ethPrice) : 0)
-
-  // Get tokens + pairs/pools from both V2 and V3 subgraphs
-  const [v2Tokens, v3Tokens, v2Pairs, v3Pools] = await Promise.all([
-    getSubgraphTokens(100), getSubgraphV3Tokens(100),
-    getSubgraphPairs(200), getSubgraphV3Pools(200),
-  ])
-
-  // A token is swappable iff it is token0/token1 of a real pair/pool. This
-  // excludes the LP/pair tokens themselves (UNI-V2), the V3 positions NFT, and
-  // vault tokens — the indexer records those as ERC20 "tokens" too, but they
-  // must never appear in a swap selector.
-  const tradeable = new Set<string>()
-  for (const p of [...v2Pairs, ...v3Pools]) {
-    if (p.token0?.id) tradeable.add(p.token0.id.toLowerCase())
-    if (p.token1?.id) tradeable.add(p.token1.id.toLowerCase())
-  }
-
-  // Merge tokens by address (V3 data takes priority, higher volume)
-  const tokenMap = new Map<string, any>()
-  for (const t of v2Tokens) {
-    tokenMap.set(t.id.toLowerCase(), { ...t, source: 'v2' })
-  }
-  for (const t of v3Tokens) {
-    const existing = tokenMap.get(t.id.toLowerCase())
-    if (!existing || parseFloat(t.volumeUSD || '0') > parseFloat(existing.tradeVolumeUSD || existing.volumeUSD || '0')) {
-      tokenMap.set(t.id.toLowerCase(), { ...t, source: 'v3' })
-    }
-  }
-
-  // Keep only swappable tokens. Skip the filter entirely when pairs are
-  // unavailable, so a subgraph hiccup degrades to "show all", never "show none".
-  const mergedTokens = Array.from(tokenMap.values())
-    .filter(t => tradeable.size === 0 || tradeable.has(t.id.toLowerCase()))
-
-  if (mergedTokens.length > 0) {
-    const tokens = mergedTokens.map(t => {
-      const meta = getTokenMeta(t.id)
-      const volume = t.source === 'v3' ? t.volumeUSD : t.tradeVolumeUSD
-      const tvl = t.source === 'v3' ? t.totalValueLockedUSD : t.totalLiquidity
-      return buildTokenResponse(t.id, chain, {
-        symbol: meta?.symbol || t.symbol,
-        name: meta?.name || t.name,
-        decimals: meta?.decimals ?? parseInt(t.decimals),
-        derivedETH: t.derivedETH,
-        volumeUSD: volume || '0',
-        totalLiquidity: tvl || '0',
-        logoUrl: meta?.logoUrl || null,
-        ethPrice,
-      })
-    })
-
-    // Add native LUX token at top
-    const nativeLux = buildTokenResponse('0x0000000000000000000000000000000000000000', chain, {
-      symbol: 'LUX',
-      name: 'Lux',
-      decimals: 18,
-      derivedETH: '1',
-      volumeUSD: '0',
-      totalLiquidity: '0',
-      logoUrl: 'https://explore.lux.network/assets/lux_logo.svg',
-      ethPrice,
-    })
-
-    return { data: { topTokens: [nativeLux, ...tokens] } }
-  }
-
-  // Fallback when the native graph has not indexed tokens yet: the curated
-  // LUX_TOKENS list. The native graph is the only volume/price source, so
-  // these surface unpriced until it indexes them.
-  const tokens = LUX_TOKENS.map(t =>
-    buildTokenResponse(t.address, chain, {
+  const ranked = await getRankedTokens()
+  const tokens = ranked.map(t =>
+    tokenResponseFromUsd(t.address, chain, {
       symbol: t.symbol,
       name: t.name,
       decimals: t.decimals,
+      priceUSD: t.priceUSD,
+      volumeUSD: t.volumeUSD,
+      tvlUSD: t.tvlUSD,
       logoUrl: t.logoUrl,
-      volumeUSD: '0',
-      ethPrice,
     }),
   )
-
   return { data: { topTokens: tokens } }
 }
 

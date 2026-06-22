@@ -1,6 +1,7 @@
 import express from 'express'
 import { handleGraphQL } from './graphql'
 import { handleSwappableTokens, handleQuote, handleSwap, handleCheckApproval } from './trading'
+import { handleTokenRankings, TOKEN_RANKINGS_PATH } from './explore'
 
 const app = express()
 const PORT = parseInt(process.env.PORT || '4000')
@@ -27,6 +28,12 @@ app.get('/v1/swappable_tokens', handleSwappableTokens)
 app.post('/v1/quote', handleQuote)
 app.post('/v1/swap', handleSwap)
 app.post('/v1/check_approval', handleCheckApproval)
+
+// Connect-RPC data-api — ExploreStatsService.TokenRankings, the token selector's
+// default list. Connect unary over HTTP/JSON: GET (?connect=v1&encoding=json
+// &message=…) and POST (application/json body). Path = package.Service/Method.
+app.get(TOKEN_RANKINGS_PATH, handleTokenRankings)
+app.post(TOKEN_RANKINGS_PATH, handleTokenRankings)
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Exchange API proxy listening on :${PORT}`)
