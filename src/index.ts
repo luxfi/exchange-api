@@ -1,7 +1,14 @@
 import express from 'express'
 import { handleGraphQL } from './graphql'
 import { handleSwappableTokens, handleQuote, handleSwap, handleCheckApproval } from './trading'
-import { handleTokenRankings, TOKEN_RANKINGS_PATH } from './explore'
+import {
+  handleTokenRankings,
+  TOKEN_RANKINGS_PATH,
+  handleExploreStats,
+  EXPLORE_STATS_PATH,
+  handleProtocolStats,
+  PROTOCOL_STATS_PATH,
+} from './explore'
 
 const app = express()
 const PORT = parseInt(process.env.PORT || '4000')
@@ -34,6 +41,12 @@ app.post('/v1/check_approval', handleCheckApproval)
 // &message=…) and POST (application/json body). Path = package.Service/Method.
 app.get(TOKEN_RANKINGS_PATH, handleTokenRankings)
 app.post(TOKEN_RANKINGS_PATH, handleTokenRankings)
+// ExploreStatsService.ExploreStats (token/pool tables) + .ProtocolStats (TVL/volume
+// charts) — the explore page. Same Connect-RPC JSON transport as TokenRankings.
+app.get(EXPLORE_STATS_PATH, handleExploreStats)
+app.post(EXPLORE_STATS_PATH, handleExploreStats)
+app.get(PROTOCOL_STATS_PATH, handleProtocolStats)
+app.post(PROTOCOL_STATS_PATH, handleProtocolStats)
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Exchange API proxy listening on :${PORT}`)
