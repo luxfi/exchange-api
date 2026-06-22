@@ -95,7 +95,10 @@ async function discoverTradeableTokens(): Promise<Map<string, DiscoveredToken>> 
       }
     }
   }
-  cacheSet(cacheKey, byAddr, TTL.SHORT)
+  // Never cache an empty discovery: a transient subgraph hiccup would otherwise
+  // pin an empty token list for the whole TTL (symptom: one pod serves only native
+  // LUX while its sibling serves the full set). Cache only a real result; retry next call.
+  if (byAddr.size > 0) cacheSet(cacheKey, byAddr, TTL.SHORT)
   return byAddr
 }
 
