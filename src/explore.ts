@@ -28,6 +28,7 @@ import type { Address } from 'viem'
 import { getRankedTokens, type RankedToken } from './subgraph'
 import { bestRoute, toWrapped } from './dexRouter'
 import { cacheGet, cacheSet, TTL } from './cache'
+import { ACTIVE } from './networks'
 
 // Connect's package.Service/Method path. Matches the generated typeName
 // `uniswap.explore.v1.ExploreStatsService` + rpc `TokenRankings`.
@@ -42,7 +43,7 @@ const RANKING_1D_DESC = 'PRICE_PERCENT_CHANGE_1_DAY_DESC'
 
 // The GraphQL Chain enum string for Lux (GraphQLApi.Chain.Lux === "LUX", → 96369).
 const LUX_CHAIN = 'LUX'
-const LUX_CHAIN_ID = '96369'
+const LUX_CHAIN_ID = String(ACTIVE.chainId)
 // The sentinel chainId meaning "all networks" (connectRpc/base.ts ALL_NETWORKS_ARG).
 const ALL_NETWORKS_ARG = 'ALL_NETWORKS'
 

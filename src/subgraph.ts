@@ -1,6 +1,7 @@
 import fetch from 'node-fetch'
 import { cacheGet, cacheSet, TTL } from './cache'
 import { getTokenMeta, LUX_TOKENS } from './lux-tokens'
+import { ACTIVE } from './networks'
 
 // Data source is the NATIVE Lux graph engine (luxfi/graph) embedded in the
 // explorer — NOT a hosted The-Graph node and NOT Uniswap's gateway. This module
@@ -9,8 +10,7 @@ import { getTokenMeta, LUX_TOKENS } from './lux-tokens'
 // separately by graphql.ts's graphEndpointFor. Both V2/V3 helpers point at the one
 // `amm` subgraph; V4 swaps surface as both pools and pairs there. Override
 // per-environment via SUBGRAPH_URL (same knob graphql.ts reads for AMM_GRAPH).
-const AMM_GRAPH = process.env.SUBGRAPH_URL ||
-  'http://explorer.lux-mainnet.svc:8090/v1/graph/cchain/amm/graphql'
+const AMM_GRAPH = process.env.SUBGRAPH_URL || ACTIVE.subgraphUrl
 const SUBGRAPH_V2_URL = AMM_GRAPH
 const SUBGRAPH_V3_URL = process.env.SUBGRAPH_V3_URL || AMM_GRAPH
 

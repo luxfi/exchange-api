@@ -21,6 +21,7 @@ import {
   type PublicClient,
 } from 'viem'
 import { getTokenMeta } from './lux-tokens'
+import { ACTIVE } from './networks'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chain + contract constants (canonical registry values for chainId 96369; see
@@ -29,16 +30,11 @@ import { getTokenMeta } from './lux-tokens'
 // the quoting path. Every amount in a quote comes from an on-chain call.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const CHAIN_ID = 96369
+// Active network's chain id + DEX contracts. Resolved from the NETWORK / CHAIN_ID
+// env at boot (default mainnet) — the single source of truth is networks.ts.
+export const CHAIN_ID = ACTIVE.chainId
 
-export const ADDRESSES = {
-  WLUX: getAddress('0x4888e4a2ee0f03051c72d2bd3acf755ed3498b3e'),
-  V3_QUOTER_V2: getAddress('0x15C729fdd833Ba675edd466Dfc63E1B737925A4c'),
-  V3_SWAP_ROUTER_02: getAddress('0x939bC0Bca6F9B9c52E6e3AD8A3C590b5d9B9D10E'),
-  V3_FACTORY: getAddress('0x80bBc7C4C7a59C899D1B37BC14539A22D5830a84'),
-  LUSD: getAddress('0x848Cff46eb323f323b6Bbe1Df274E40793d7f2c2'),
-  MULTICALL3: getAddress('0xd25F88CBdAe3c2CCA3Bb75FC4E723b44C0Ea362F'),
-} as const
+export const ADDRESSES = ACTIVE.contracts
 
 // Native sentinel — represents native LUX. Treated as WLUX for routing/quoting math,
 // but echoed back verbatim in token fields when the caller passes it.
@@ -278,7 +274,7 @@ export const ERC20_APPROVE_ABI = [
 // Public client — bound to LUX_RPC_URL + chain 96369. One lazily-created singleton.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const RPC_URL = process.env.LUX_RPC_URL || 'https://api.lux.network/ext/bc/C/rpc'
+const RPC_URL = process.env.LUX_RPC_URL || ACTIVE.rpcUrl
 
 // NOTE: Multicall3 is deployed on this chain but its `aggregate3` reverts at the top
 // level (even with per-call allowFailure), so we do NOT wire `contracts.multicall3` and
