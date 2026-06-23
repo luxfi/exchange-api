@@ -3,6 +3,7 @@ import fetch from 'node-fetch'
 import { cacheGet, cacheSet, TTL } from './cache'
 import { getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphSwaps, getSubgraphV3Pools, getV3Bundle, getSubgraphV3Swaps, getRankedTokens } from './subgraph'
 import { getTokenMeta } from './lux-tokens'
+import { filterRealMarkets, type RawMarket } from './dexMarkets'
 
 // The native Lux graph engine (luxfi/graph in the explorer) is the single source
 // of truth. It exposes TWO schemas on the SAME host/slug under distinct subgraph
@@ -169,6 +170,106 @@ export function graphEndpointFor(body: any): string {
   return root !== null && dexRootFields.has(root) ? DEX_GRAPH : AMM_GRAPH
 }
 
+// acceptedMarketIds resolves the set of REAL market ids for the dex graph by
+// fetching its markets once and running them through the real-asset gate. It is the
+// single source of truth for "which markets are real", reused by every dex response
+// (markets, orders-only, fills-only) so the policy lives in exactly one place. The
+// per-token on-chain results are cached in filterRealMarkets; this short fetch is
+// also cheap and bounded.
+async function acceptedMarketIds(): Promise<Set<string>> {
+  const cacheKey = `dex:accepted-ids:${DEX_GRAPH}`
+  const cached = cacheGet(cacheKey) as string[] | null
+  if (cached) {
+    return new Set(cached)
+  }
+  let ids: string[] = []
+  try {
+    const res = await fetch(DEX_GRAPH, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: '{ markets { id symbol bestBid bestAsk baseToken quoteToken assetsBound } }',
+      }),
+      signal: AbortSignal.timeout(15000),
+    })
+    const json = await res.json()
+    const markets = (json as any)?.data?.markets
+    if (Array.isArray(markets)) {
+      const { acceptedIds } = await filterRealMarkets(markets as RawMarket[])
+      ids = [...acceptedIds]
+    }
+  } catch {
+    ids = [] // fail closed — no provable markets ⇒ no orders/fills survive
+  }
+  // Short TTL: the orders/fills polls (~4s) reuse this set; markets refresh at PROXY.
+  cacheSet(cacheKey, ids, TTL.PROXY)
+  return new Set(ids)
+}
+
+// sanitizeDexData enforces the real-asset gate on a DEX (CLOB) graph response
+// before it leaves this API: the markets display must surface ONLY real,
+// accepted-chain-state markets. Synthetic-seed rows (phantom asset ids, crossed
+// books, mock/test/Liquidity* tokens) are REJECTED (stripped). The FE issues
+// markets / orders / fills as SEPARATE queries, so each is gated:
+//   • a `markets` payload is filtered to the real set directly;
+//   • an orders-only / fills-only payload is filtered against the real-market set
+//     (resolved via acceptedMarketIds) — a row survives ONLY if it carries a
+//     `market` in that set. Fail closed: a row with no resolvable market link, or
+//     when zero markets are real, is dropped. This keeps synthetic-seed fills off
+//     the "Recent Trades" panel even though dex `fills` rows carry no market field.
+// AMM responses and dex responses with none of these collections pass through.
+//
+// Verification calls the network's C-Chain RPC (per-token code + decimals, cached),
+// so a network whose real asset contracts are not yet deployed yields an EMPTY
+// market list — the correct "No active markets" state, with no special-casing.
+export async function sanitizeDexData(data: any): Promise<any> {
+  const d = data?.data
+  if (!d || typeof d !== 'object') {
+    return data
+  }
+  const hasMarkets = Array.isArray(d.markets)
+  const hasOrders = Array.isArray(d.orders)
+  const hasFills = Array.isArray(d.fills)
+  if (!hasMarkets && !hasOrders && !hasFills) {
+    return data // nothing CLOB-shaped to gate
+  }
+
+  let real: RawMarket[] | undefined
+  let acceptedIds: Set<string>
+  if (hasMarkets) {
+    const r = await filterRealMarkets(d.markets as RawMarket[])
+    real = r.markets
+    acceptedIds = r.acceptedIds
+  } else {
+    // orders/fills-only — resolve the real-market set independently.
+    acceptedIds = await acceptedMarketIds()
+  }
+
+  const out = { ...data, data: { ...d } }
+  if (hasMarkets) {
+    out.data.markets = real
+  }
+  // Orders carry a `market` id ⇒ filter precisely to accepted markets.
+  if (Array.isArray(out.data.orders)) {
+    out.data.orders = out.data.orders.filter(
+      (r: any) => typeof r?.market === 'string' && acceptedIds.has(r.market),
+    )
+  }
+  // Fills are emitted globally by the matcher and (in this schema) carry NO market
+  // field, so they cannot be attributed per-market. They are legitimate chain output
+  // ONLY when real markets exist; when zero markets are real, every fill is synthetic
+  // seed and is dropped. If a fill DOES carry a market id, it must be an accepted one.
+  if (Array.isArray(out.data.fills)) {
+    out.data.fills =
+      acceptedIds.size === 0
+        ? []
+        : out.data.fills.filter(
+            (r: any) => r?.market === undefined || acceptedIds.has(r.market),
+          )
+  }
+  return out
+}
+
 // Chains we special-case with shaped Token/V2Pair/V3Pool responses. Everything
 // else (and raw subgraph queries) is forwarded to the native graph as-is.
 const NATIVE_CHAINS = new Set(['LUX', 'ZOO'])
@@ -209,7 +310,11 @@ async function proxyToNativeGraph(body: any): Promise<any> {
       body: JSON.stringify({ query: body?.query, variables: body?.variables }),
       signal: AbortSignal.timeout(15000),
     })
-    const data = await res.json()
+    const raw = await res.json()
+    // DEX (CLOB) responses pass the real-asset gate before caching, so synthetic-
+    // seed markets are stripped at the source and never cached/served. AMM
+    // responses are returned verbatim.
+    const data = endpoint === DEX_GRAPH ? await sanitizeDexData(raw) : raw
     cacheSet(cacheKey, data, TTL.PROXY)
     return data
   } catch (e) {
