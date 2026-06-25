@@ -63,16 +63,19 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     dexSubgraphUrl: 'http://explorer.lux-testnet.svc:8090/v1/graph/cchain/dex/graphql',
     contracts: {
       WLUX: getAddress('0xf3a126C12EE4f413573B8a32a36953Bd43719E30'),
-      LUSD: ZERO, // not yet deployed on testnet
-      V3_QUOTER_V2: ZERO, // V3 deploy pending
-      V3_SWAP_ROUTER_02: ZERO,
-      V3_FACTORY: ZERO,
+      // DLUX is testnet's Lux Dollar — the stable hub (mainnet calls it LUSD).
+      LUSD: getAddress('0x97c265001EB088E1dE2F77A13a62B708014c9e68'),
+      // V3 is deployed on testnet at the canonical (deterministic) addresses,
+      // same as mainnet. Verified on-chain via api.lux-test.network.
+      V3_QUOTER_V2: getAddress('0x15C729fdd833Ba675edd466Dfc63E1B737925A4c'),
+      V3_SWAP_ROUTER_02: getAddress('0x939bC0Bca6F9B9c52E6e3AD8A3C590b5d9B9D10E'),
+      V3_FACTORY: getAddress('0x80bBc7C4C7a59C899D1B37BC14539A22D5830a84'),
       MULTICALL3,
     },
   },
   devnet: {
     name: 'devnet',
-    chainId: 96370,
+    chainId: 96367,
     rpcUrl: 'https://api.lux-dev.network/ext/bc/C/rpc',
     subgraphUrl: 'http://explorer.lux-devnet.svc:8090/v1/graph/cchain/amm/graphql',
     dexSubgraphUrl: 'http://explorer.lux-devnet.svc:8090/v1/graph/cchain/dex/graphql',
@@ -87,7 +90,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
   },
   localnet: {
     name: 'localnet',
-    chainId: 1337,
+    chainId: 31337,
     rpcUrl: 'http://127.0.0.1:9650/ext/bc/C/rpc',
     subgraphUrl: 'http://127.0.0.1:8090/v1/graph/cchain/amm/graphql',
     dexSubgraphUrl: 'http://127.0.0.1:8090/v1/graph/cchain/dex/graphql',
