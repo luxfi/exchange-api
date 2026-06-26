@@ -6,13 +6,19 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fetch from 'node-fetch'
 import type { Request, Response } from 'express'
-import { handleSwappableTokens, handleQuote, handleCheckApproval } from './trading'
+import { handleSwappableTokens, handleQuote, handleCheckApproval, buildSwappableTokens } from './trading'
 import { getClient, ADDRESSES, NATIVE_SENTINEL } from './dexRouter'
+import { LUX_TOKENS } from './lux-tokens'
 
 const CYRUS = '0x0A78f7Ce8D65e0FD4D6B78848483bA3C4fb895c5'
 const WLUX = ADDRESSES.WLUX
+const LUSD = ADDRESSES.LUSD
 const SWAPPER = '0x0000000000000000000000000000000000000001'
 const ONE = '1000000000000000000'
+// Junk the AMM indexer picked up but which are NOT real Lux assets (fake USDC/USDT).
+// Curated curation must exclude these from the swappable set, by construction.
+const JUNK_USDC = '0x8031e9b0d02a792cfefaa2bdca6e1289d385426f'
+const JUNK_USDT = '0xdf1de693c31e2a5eb869c329529623556b20abf3'
 
 // Minimal Express req/res doubles capturing the status code + JSON body.
 interface Captured {
@@ -109,6 +115,51 @@ test('LIVE swappable_tokens: native LUX first, includes CYRUS, every decimals is
   )
 })
 
+// ── swappable_tokens: curated source of truth (pure, no network) ───────────────
+
+test('lux-tokens: curated data has LUX/WLUX/LUSD and excludes the indexed junk USDC/USDT', () => {
+  const set = new Set(LUX_TOKENS.map((t) => t.address.toLowerCase()))
+  assert.ok(set.has(NATIVE_SENTINEL.toLowerCase()), 'native LUX sentinel present')
+  assert.ok(set.has(WLUX.toLowerCase()), 'WLUX present')
+  assert.ok(set.has(LUSD.toLowerCase()), 'LUSD present')
+  assert.ok(!set.has(JUNK_USDC), 'fake USDC must not be curated')
+  assert.ok(!set.has(JUNK_USDT), 'fake USDT must not be curated')
+})
+
+test('buildSwappableTokens([]): curated list is the source of truth — native first, junk excluded, shape valid', () => {
+  const tokens = buildSwappableTokens([])
+  // Native LUX is always first (sentinel address).
+  assert.equal(tokens[0].address, NATIVE_SENTINEL)
+  assert.equal(tokens[0].symbol, 'LUX')
+  // Exactly one entry per curated token — never fewer (immune to the subgraph thin-list
+  // bug) and never more (junk can't be added).
+  assert.equal(tokens.length, LUX_TOKENS.length)
+  const addrs = new Set(tokens.map((t) => t.address.toLowerCase()))
+  assert.ok(addrs.has(WLUX.toLowerCase()), 'WLUX present')
+  assert.ok(addrs.has(LUSD.toLowerCase()), 'LUSD present')
+  assert.ok(!addrs.has(JUNK_USDC), 'fake USDC excluded')
+  assert.ok(!addrs.has(JUNK_USDT), 'fake USDT excluded')
+  // Shape: decimals numeric, project well-formed, chainId pinned to 96369.
+  for (const t of tokens) {
+    assert.equal(t.chainId, 96369)
+    assert.equal(typeof t.decimals, 'number')
+    assert.equal(t.isSpam, false)
+    assert.equal(t.project.safetyLevel, 'VERIFIED')
+    assert.ok(t.project.logo === null || typeof t.project.logo.url === 'string')
+  }
+})
+
+test('buildSwappableTokens(order): subgraph ranks curated tokens but never changes membership', () => {
+  // Subgraph reports LUSD first (highest liquidity) plus a junk address it indexed.
+  const tokens = buildSwappableTokens([LUSD.toLowerCase(), JUNK_USDC])
+  // Native always first; LUSD becomes the first NON-native (ranked #1 by the subgraph).
+  assert.equal(tokens[0].address, NATIVE_SENTINEL)
+  assert.equal(tokens[1].address.toLowerCase(), LUSD.toLowerCase(), 'subgraph rank orders LUSD first')
+  // Membership unchanged: full curated set, junk still absent (the rank for junk is ignored).
+  assert.equal(tokens.length, LUX_TOKENS.length)
+  assert.ok(!new Set(tokens.map((t) => t.address.toLowerCase())).has(JUNK_USDC))
+})
+
 // ── quote ─────────────────────────────────────────────────────────────────────
 
 test('quote: foreign tokenInChainId yields a 404 QUOTE_ERROR, not a 500', async () => {
@@ -140,6 +191,38 @@ test('quote: a malformed amount is a 400 boundary error', async () => {
     res,
   )
   assert.equal(captured.status, 400)
+})
+
+test('quote: an unroutable pair returns a clean 200 CLASSIC with an empty route, not a 404', async () => {
+  const { res, captured } = mockRes()
+  // 0x..02 is a precompile address: valid format, on chain 96369, but no V3 pool exists —
+  // so bestRoute yields null whether the RPC is up (quoter reverts) or down (read throws).
+  // The FE's EXACT_OUTPUT USD-price probe relies on this degrading gracefully (no 404).
+  const NO_POOL = '0x0000000000000000000000000000000000000002'
+  await handleQuote(
+    mockReq({
+      body: {
+        type: 'EXACT_OUTPUT',
+        amount: ONE,
+        tokenInChainId: 96369,
+        tokenOutChainId: 96369,
+        tokenIn: NO_POOL,
+        tokenOut: WLUX,
+        swapper: SWAPPER,
+      },
+    }),
+    res,
+  )
+  assert.equal(captured.status, 200, JSON.stringify(captured.body))
+  assert.equal(captured.body.routing, 'CLASSIC')
+  assert.equal(captured.body.permitData, null)
+  assert.ok(typeof captured.body.requestId === 'string')
+  const q = captured.body.quote
+  // Empty route = the FE's documented "non-null quote, no routes" path → null trade.
+  assert.ok(Array.isArray(q.route), 'route must be an array')
+  assert.equal(q.route.length, 0, 'no-route quote carries an EMPTY route')
+  assert.equal(q.tradeType, 'EXACT_OUTPUT')
+  assert.equal(q.chainId, 96369)
 })
 
 test('LIVE quote CYRUS→WLUX: CLASSIC, permitData null, route is Array<Array>, decimals are strings, output > 0', async () => {

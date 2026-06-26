@@ -18,7 +18,7 @@ import {
 } from 'viem'
 import { cacheGet, cacheSet, TTL } from './cache'
 import { getSubgraphPairs, getSubgraphV3Pools } from './subgraph'
-import { getTokenMeta, LUX_NATIVE } from './lux-tokens'
+import { LUX_TOKENS, LUX_NATIVE, type TokenMeta } from './lux-tokens'
 import {
   ADDRESSES,
   CHAIN_ID,
@@ -63,44 +63,12 @@ function isAddressLike(s: unknown): s is string {
 // GET /v1/swappable_tokens
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Token set = native LUX first + the union of token0/token1 across the graph's pairs
-// and V3 pools, enriched via getTokenMeta. Only tokens that are token0/token1 of a real
-// pool qualify — this excludes LP/position tokens (mirrors handleTopTokens in
-// graphql.ts). The graph is discovery-only; we read ONLY token id/symbol/decimals from
-// it (never reserves/prices). decimals MUST be a number in this response.
-
-interface DiscoveredToken {
-  id: string
-  symbol?: string
-  decimals?: string | number
-  name?: string
-}
-
-async function discoverTradeableTokens(): Promise<Map<string, DiscoveredToken>> {
-  const cacheKey = 'trading:swappable'
-  const cached = cacheGet(cacheKey) as Map<string, DiscoveredToken> | null
-  if (cached) return cached
-
-  const [pairs, pools] = await Promise.all([
-    getSubgraphPairs(200),
-    getSubgraphV3Pools(200),
-  ])
-
-  const byAddr = new Map<string, DiscoveredToken>()
-  for (const p of [...pairs, ...pools]) {
-    for (const t of [p.token0, p.token1]) {
-      if (t?.id) {
-        const key = t.id.toLowerCase()
-        if (!byAddr.has(key)) byAddr.set(key, t)
-      }
-    }
-  }
-  // Never cache an empty discovery: a transient subgraph hiccup would otherwise
-  // pin an empty token list for the whole TTL (symptom: one pod serves only native
-  // LUX while its sibling serves the full set). Cache only a real result; retry next call.
-  if (byAddr.size > 0) cacheSet(cacheKey, byAddr, TTL.SHORT)
-  return byAddr
-}
+// The curated lux-tokens list is the SOURCE OF TRUTH for the swappable set: a token is
+// returned iff it is curated (native LUX first). The subgraph is consulted ONLY to ORDER
+// the curated tokens by observed liquidity — it can neither ADD a member (so junk the
+// indexer picked up, e.g. fake USDC/USDT, never surfaces) nor DROP one (so the subgraph's
+// intermittent "premature close" thin-list — sometimes only native LUX — can't shrink the
+// selector). decimals MUST be a number in this response.
 
 interface SwappableToken {
   address: string
@@ -112,20 +80,72 @@ interface SwappableToken {
   decimals: number
 }
 
-function nativeSwappableToken(): SwappableToken {
+// Project a curated token into the response shape. Native LUX keeps the zero sentinel as
+// its address; ERC20s are checksummed. Every curated token is VERIFIED by construction.
+function curatedSwappableToken(t: TokenMeta): SwappableToken {
   return {
-    address: NATIVE_SENTINEL,
+    address: isNative(t.address) ? NATIVE_SENTINEL : getAddress(t.address),
     chainId: CHAIN_ID,
-    name: LUX_NATIVE.name,
-    symbol: LUX_NATIVE.symbol,
+    name: t.name,
+    symbol: t.symbol,
     project: {
-      logo: LUX_NATIVE.logoUrl ? { url: LUX_NATIVE.logoUrl } : null,
+      logo: t.logoUrl ? { url: t.logoUrl } : null,
       safetyLevel: 'VERIFIED',
       isSpam: false,
     },
     isSpam: false,
-    decimals: LUX_NATIVE.decimals,
+    decimals: t.decimals,
   }
+}
+
+// Pure core: the curated set (source of truth) ordered by a subgraph liquidity ranking.
+// Membership is ALWAYS the full curated list — native LUX first, then the rest sorted by
+// `order` (unknown/unranked addresses sink to the end; curated order breaks ties). The
+// subgraph can neither add nor remove a token here. No I/O — unit-testable in isolation.
+export function buildSwappableTokens(order: string[]): SwappableToken[] {
+  const rank = new Map<string, number>()
+  order.forEach((addr, i) => {
+    const key = addr.toLowerCase()
+    if (!rank.has(key)) rank.set(key, i)
+  })
+  const rankOf = (addr: string): number => rank.get(addr.toLowerCase()) ?? Number.MAX_SAFE_INTEGER
+
+  const rest = LUX_TOKENS.map((t, idx) => ({ t, idx }))
+    .filter(({ t }) => !isNative(t.address))
+    .sort((a, b) => rankOf(a.t.address) - rankOf(b.t.address) || a.idx - b.idx)
+    .map(({ t }) => t)
+
+  return [LUX_NATIVE, ...rest].map(curatedSwappableToken)
+}
+
+// Subgraph-derived ORDERING hint: lowercase token addresses in descending-liquidity order
+// (pairs/pools are fetched ordered by reserveUSD/TVL desc, so first-seen = highest
+// liquidity). Ordering ONLY — never decides membership. Returns [] on a subgraph miss (the
+// caller then falls back to curated order). Never caches an empty result: a transient
+// hiccup must not pin an empty ordering for the whole TTL.
+async function subgraphTokenOrder(): Promise<string[]> {
+  const cacheKey = 'trading:swappable:order'
+  const cached = cacheGet(cacheKey) as string[] | null
+  if (cached) return cached
+
+  const [pairs, pools] = await Promise.all([
+    getSubgraphPairs(200),
+    getSubgraphV3Pools(200),
+  ])
+
+  const order: string[] = []
+  const seen = new Set<string>()
+  for (const p of [...pairs, ...pools]) {
+    for (const t of [p.token0, p.token1]) {
+      const id = typeof t?.id === 'string' ? t.id.toLowerCase() : undefined
+      if (id && !seen.has(id)) {
+        seen.add(id)
+        order.push(id)
+      }
+    }
+  }
+  if (order.length > 0) cacheSet(cacheKey, order, TTL.SHORT)
+  return order
 }
 
 export async function handleSwappableTokens(req: Request, res: Response): Promise<void> {
@@ -134,37 +154,11 @@ export async function handleSwappableTokens(req: Request, res: Response): Promis
     if (chainIdRaw !== undefined && Number.isNaN(parseInt(String(chainIdRaw), 10))) {
       return badRequest(res, 'tokenInChainId must be a number')
     }
-    // LX_API is a single-chain trading API: its token universe is the Lux C-Chain
-    // (96369) pool set, full stop. The Uniswap interface prefetches swappable_tokens
-    // with whatever chain the swap form currently holds — which can transiently be a
-    // generic default before the brand config resolves the chain. Serving our tokens
-    // (every token carries its real chainId: 96369) keeps the selector populated
-    // instead of erroring; cross-chain semantics don't apply to a one-chain venue.
-
-    const discovered = await discoverTradeableTokens()
-
-    const tokens: SwappableToken[] = [nativeSwappableToken()]
-    for (const [addr, d] of discovered) {
-      const meta = getTokenMeta(addr)
-      const decimals =
-        meta?.decimals ??
-        (d.decimals !== undefined ? parseInt(String(d.decimals), 10) : NaN)
-      if (Number.isNaN(decimals)) continue // a token without resolvable decimals is unusable
-      tokens.push({
-        address: getAddress(addr),
-        chainId: CHAIN_ID,
-        name: meta?.name ?? d.name ?? d.symbol ?? 'Unknown Token',
-        symbol: meta?.symbol ?? d.symbol ?? '???',
-        project: {
-          logo: meta?.logoUrl ? { url: meta.logoUrl } : null,
-          safetyLevel: 'VERIFIED',
-          isSpam: false,
-        },
-        isSpam: false,
-        decimals,
-      })
-    }
-
+    // LX_API is single-chain (Lux C-Chain 96369). The interface prefetches this list with
+    // whatever chain the swap form currently holds — possibly a transient generic default.
+    // We ignore it and always serve the Lux set (every token carries chainId 96369) so the
+    // selector never empties; cross-chain semantics don't apply to a one-chain venue.
+    const tokens = buildSwappableTokens(await subgraphTokenOrder())
     res.json({ requestId: randomUUID(), tokens })
   } catch (e) {
     serverError(res, 'swappable_tokens', e)
@@ -263,6 +257,43 @@ interface QuoteBody {
   slippageTolerance?: number
 }
 
+// A no-route result is NOT an error. The FE fires EXACT_OUTPUT quotes as USD-price probes
+// for tokens that often have no fillable pool; a hard 404 there breaks the render and
+// triggers react-query retry storms. Instead return a well-formed CLASSIC quote with an
+// EMPTY route: the FE's computeRoutes treats `route: []` as "non-null quote, no routes"
+// and degrades to a null trade (no price shown), which is the documented graceful path.
+// Amounts echo as "0"; tokens round-trip the caller's input (native sentinel preserved).
+// Genuine errors still surface as errors: bad input → 400, foreign chain → 404, RPC fault
+// → 500 (all handled before/around this).
+function noRouteQuote(
+  res: Response,
+  body: QuoteBody,
+  type: TradeType,
+  swapper: string,
+  slippage: number,
+): void {
+  res.json({
+    requestId: randomUUID(),
+    routing: 'CLASSIC',
+    permitData: null,
+    quote: {
+      chainId: CHAIN_ID,
+      swapper,
+      input: { token: echoToken(body.tokenIn!), amount: '0' },
+      output: { token: echoToken(body.tokenOut!), amount: '0', recipient: swapper },
+      tradeType: type,
+      slippage,
+      gasUseEstimate: '0',
+      gasFee: '0',
+      route: [],
+      routeString: '',
+      quoteId: randomUUID(),
+      blockNumber: '0',
+      priceImpact: 0,
+    },
+  })
+}
+
 export async function handleQuote(req: Request, res: Response): Promise<void> {
   try {
     const body = req.body as QuoteBody
@@ -296,7 +327,8 @@ export async function handleQuote(req: Request, res: Response): Promise<void> {
 
     const route: Route | null = await bestRoute(wrappedIn, wrappedOut, amount, type)
     if (!route || route.hops.length === 0) {
-      return notFound(res, 'No quotes available')
+      // No fillable pool for this pair/amount — clean no-route response, not a 404.
+      return noRouteQuote(res, body, type, swapper, slippage)
     }
 
     const [inMeta, outMeta] = await Promise.all([
