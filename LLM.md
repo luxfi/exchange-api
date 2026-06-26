@@ -19,7 +19,7 @@ PORT=4000 SUBGRAPH_URL=https://explore.lux.network/v1/graph/cchain/amm/graphql n
 | Method | Path | Handler | Notes |
 |--------|------|---------|-------|
 | ANY (CORS) / GET | `/health` | inline | `{status:"ok"}` |
-| POST | `/v1/graphql` | graphql.ts | verbatim native-graph proxy (amm vs dex lead-root routing) |
+| POST | `/v1/graphql` | graphql.ts | split by lead root: AMM (pools/swaps/tokens) → explorer amm graph; CLOB (markets/orders/fills) → D-Chain read surface (dchain.ts) |
 | GET | `/v1/swappable_tokens` | trading.ts | native LUX first + token0/token1 union across pairs/pools; `decimals` is a **number** |
 | POST | `/v1/quote` | trading.ts | `routing:"CLASSIC"`, `permitData:null`, `quote.route:[[V3PoolInRoute…]]`; `TokenInRoute.decimals` is a **string**; 404 `QUOTE_ERROR` on no pool |
 | POST | `/v1/swap` | trading.ts | SwapRouter02 calldata: single→`exactInputSingle`/`exactOutputSingle`, multi→`exactInput`/`exactOutput` (path reversed for exactOutput); native in → `value=amountIn` |
@@ -29,6 +29,51 @@ PORT=4000 SUBGRAPH_URL=https://explore.lux.network/v1/graph/cchain/amm/graphql n
 Responses conform to the generated OpenAPI models in
 `~/work/lux/exchange/pkgs/api/src/clients/trading/__generated__/models` (trading-api) and
 the protobufs in `@luxamm/client-explore/dist/lx/explore/v1/service_pb` (TokenRankings).
+
+## Native DEX (CLOB) data source — the D-Chain read surface (dchain.ts + dexRouting.ts)
+
+The FE's CLOB surface (markets / order book / recent trades) issues three GraphQL
+queries to `/v1/graphql` — `{ markets {…} }`, `{ orders(first:500){…} }`,
+`{ fills(first:N){…} }` (see exchange `apps/web/src/state/explore/dexSubgraph.ts`).
+The exchange-api is the STABLE ABSTRACTION: the FE never knows the source.
+
+- **Routing** (`dexRouting.ts`): `isDexQuery(body)` is true iff the query's LEADING
+  top-level field is a CLOB root (`markets/orders/fills/orderbook/…`). `graphql.ts`
+  routes those to the D-Chain adapter; everything else to the AMM graph
+  (`AMM_GRAPH`/`SUBGRAPH_URL`). Lead-root only — a sibling/nested/aliased/in-string
+  `markets` never mis-routes (`leadRootField`).
+- **Source** (`dchain.ts`): the native V4 CLOB lives in the **D-Chain VM**
+  (`luxfi/dex/pkg/dchain`), which exposes a JSON READ surface
+  (`dex/pkg/dchain/read.go`) under the chain route group — the SAME base the maker
+  WRITES orders to (`POST .../dex/dex_place`). It returns committed chain state,
+  identical on every validator at a height — the authoritative source, no indexer.
+
+  | FE GraphQL query | D-Chain read (GET) | mapper (`dchain.ts`) |
+  |---|---|---|
+  | `{ markets {…} }` | `<base>/dex/dex_get_markets` | `marketToRaw` (poolId→id, base/quote→baseToken/quoteToken, numbers→strings) |
+  | `{ orders(first){…} }` | per market: `<base>/dex/dex_get_orders?market=<poolIdHex>` | `orderToFe` (tags each order with its market id; FE filters client-side) |
+  | `{ fills(first:N){…} }` | `<base>/dex/dex_get_trades?limit=1000` | `tradeToFill` (takerSide→side; tail+reverse → newest-first) |
+
+  `<base>` = `DEX_DCHAIN_URL` or `ACTIVE.dexDchainUrl` (networks.ts), the chain
+  route prefix `http://<luxd>:<port>/ext/bc/D`. Per-network in-cluster luxd RPC:
+  mainnet `:9630`, testnet `:9640`, devnet/localnet `:9650`. The real-asset gate
+  (`dexMarkets.ts` `filterRealMarkets`) runs on the mapped rows before serving, so
+  synthetic-seed / phantom-asset markets are stripped at the source.
+
+- **Why not the `cchain/dex` subgraph**: the old `DEX_GRAPH` derived
+  `…/v1/graph/cchain/dex/graphql` (the 0x9999 settlement subgraph). That route
+  **404s** on the deployed explorer (`amm` returns 200; `dex` 404 — verified live),
+  AND it depends on the 0x9999 settlement+indexer chain being wired. The D-Chain's
+  own read surface is the source of truth and needs no separate indexer. When a
+  settlement subgraph later lands, the source swaps INSIDE this adapter — the FE and
+  these queries are unchanged.
+
+- **Verification**: live-verifiable only from a cluster pod — the D-Chain is NOT
+  publicly exposed (`api.lux.network/ext/bc/D` 404s). From a pod:
+  `curl http://<luxd>:<port>/ext/bc/D/dex/dex_get_markets` should return
+  `{height,…,markets:[…]}`, and the maker (github.com/luxfi/maker) must be seeding
+  for the list to be non-empty. The mapping itself is unit-tested offline
+  (`dchain.test.ts`, injected transport).
 
 ## explore.ts — Connect-RPC data-api (3rd backend the FE needs)
 The FE token selector loads its default list from `ExploreStatsService.TokenRankings` via the

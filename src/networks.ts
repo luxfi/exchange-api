@@ -8,7 +8,7 @@
 //
 // Mainnet defaults are byte-identical to the previous hardcoded values, so the
 // live deployment (which leaves NETWORK unset → mainnet) is unchanged. Any field
-// is still overridable by env (LUX_RPC_URL, SUBGRAPH_URL, DEX_SUBGRAPH_URL) for
+// is still overridable by env (LUX_RPC_URL, SUBGRAPH_URL, DEX_DCHAIN_URL) for
 // in-cluster wiring.
 //
 // V3 contracts that are not yet deployed on a network are the zero address; the
@@ -35,7 +35,12 @@ export interface NetworkConfig {
   chainId: number
   rpcUrl: string
   subgraphUrl: string
-  dexSubgraphUrl: string
+  // dexDchainUrl is the native V4 CLOB (D-Chain) read base — the chain route
+  // prefix `.../ext/bc/D` whose dex_get_* JSON endpoints the dchain.ts adapter
+  // reads (markets/orders/fills). The in-cluster luxd validator RPC; override via
+  // DEX_DCHAIN_URL. The D-Chain is NOT publicly exposed (api.lux.network/ext/bc/D
+  // 404s), so this is an in-cluster address, reachable only from a cluster pod.
+  dexDchainUrl: string
   contracts: NetworkContracts
 }
 
@@ -45,7 +50,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     chainId: 96369,
     rpcUrl: 'https://api.lux.network/ext/bc/C/rpc',
     subgraphUrl: 'http://explorer.lux-mainnet.svc:8090/v1/graph/cchain/amm/graphql',
-    dexSubgraphUrl: 'http://explorer.lux-mainnet.svc:8090/v1/graph/cchain/dex/graphql',
+    dexDchainUrl: 'http://luxd-0.luxd-headless.lux-mainnet.svc:9630/ext/bc/D',
     contracts: {
       WLUX: getAddress('0x4888e4a2ee0f03051c72d2bd3acf755ed3498b3e'),
       LUSD: getAddress('0x848Cff46eb323f323b6Bbe1Df274E40793d7f2c2'),
@@ -60,7 +65,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     chainId: 96368,
     rpcUrl: 'https://api.lux-test.network/ext/bc/C/rpc',
     subgraphUrl: 'http://explorer.lux-testnet.svc:8090/v1/graph/cchain/amm/graphql',
-    dexSubgraphUrl: 'http://explorer.lux-testnet.svc:8090/v1/graph/cchain/dex/graphql',
+    dexDchainUrl: 'http://luxd-0.luxd-headless.lux-testnet.svc:9640/ext/bc/D',
     contracts: {
       WLUX: getAddress('0xf3a126C12EE4f413573B8a32a36953Bd43719E30'),
       // DLUX is testnet's Lux Dollar — the stable hub (mainnet calls it LUSD).
@@ -78,7 +83,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     chainId: 96367,
     rpcUrl: 'https://api.lux-dev.network/ext/bc/C/rpc',
     subgraphUrl: 'http://explorer.lux-devnet.svc:8090/v1/graph/cchain/amm/graphql',
-    dexSubgraphUrl: 'http://explorer.lux-devnet.svc:8090/v1/graph/cchain/dex/graphql',
+    dexDchainUrl: 'http://luxd-0.luxd-headless.lux-devnet.svc:9650/ext/bc/D',
     contracts: {
       WLUX: getAddress('0xc65ea8882020Af7CDa7854d590C6Fcd34BF364ec'),
       LUSD: ZERO,
@@ -93,7 +98,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     chainId: 31337,
     rpcUrl: 'http://127.0.0.1:9650/ext/bc/C/rpc',
     subgraphUrl: 'http://127.0.0.1:8090/v1/graph/cchain/amm/graphql',
-    dexSubgraphUrl: 'http://127.0.0.1:8090/v1/graph/cchain/dex/graphql',
+    dexDchainUrl: 'http://127.0.0.1:9650/ext/bc/D',
     contracts: {
       WLUX: ZERO, // deterministic local deploy fills these in
       LUSD: ZERO,

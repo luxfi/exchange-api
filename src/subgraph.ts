@@ -6,8 +6,8 @@ import { ACTIVE } from './networks'
 // Data source is the NATIVE Lux graph engine (luxfi/graph) embedded in the
 // explorer — NOT a hosted The-Graph node and NOT Uniswap's gateway. This module
 // queries ONLY the uniswap-v2/v3-compatible `amm` schema (pools, pairs, swaps,
-// tokens, factories) — the native-CLOB `dex` schema (markets/fills) is routed
-// separately by graphql.ts's graphEndpointFor. Both V2/V3 helpers point at the one
+// tokens, factories) — the native-CLOB markets/orders/fills are served from the
+// D-Chain read surface (dchain.ts), split by dexRouting.isDexQuery. Both V2/V3 helpers point at the one
 // `amm` subgraph; V4 swaps surface as both pools and pairs there. Override
 // per-environment via SUBGRAPH_URL (same knob graphql.ts reads for AMM_GRAPH).
 const AMM_GRAPH = process.env.SUBGRAPH_URL || ACTIVE.subgraphUrl
