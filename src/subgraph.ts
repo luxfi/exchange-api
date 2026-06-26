@@ -269,7 +269,13 @@ export async function getRankedTokens(): Promise<RankedToken[]> {
   // Keep only swappable tokens. Skip the filter entirely when no pools resolved, so
   // a subgraph hiccup degrades to "show all", never "show none".
   const merged = Array.from(tokenMap.values()).filter(
-    (t) => tradeable.size === 0 || tradeable.has(t.id.toLowerCase()),
+    (t) =>
+      // Real-asset gate: surface a token ONLY if it is in the curated lux-tokens list.
+      // The subgraph records junk/test tokens (e.g. fake USDC/USDT) as pool token0/token1;
+      // without this gate they leak into TokenRankings / ExploreStats / topTokens — every
+      // surface that projects from this list. The curated list is the single source of
+      // truth for "real Lux token". Native LUX is added separately below.
+      !!getTokenMeta(t.id) && (tradeable.size === 0 || tradeable.has(t.id.toLowerCase())),
   )
 
   let ranked: RankedToken[]
