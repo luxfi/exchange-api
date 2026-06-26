@@ -5,6 +5,15 @@ import { getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphSwaps, getSu
 import { getTokenMeta } from './lux-tokens'
 import { filterRealMarkets, type RawMarket } from './dexMarkets'
 
+// Real-asset gate for the AMM token/pool surfaces. The native graph indexes junk/test
+// tokens (e.g. fake USDC/USDT contracts) that are NOT real Lux assets; a token surfaces
+// in topTokens / V2-V3 pool lists ONLY if it is the native coin or resolves in the
+// curated lux-tokens list. This is the SAME real-asset gate /v1/swappable_tokens uses —
+// one definition of "real token", reused on every surface the token selector reads.
+const NATIVE_ADDR = '0x0000000000000000000000000000000000000000'
+const isCuratedAddress = (addr?: string | null): boolean =>
+  !!addr && (addr.toLowerCase() === NATIVE_ADDR || !!getTokenMeta(addr))
+
 // The native Lux graph engine (luxfi/graph in the explorer) is the single source
 // of truth. It exposes TWO schemas on the SAME host/slug under distinct subgraph
 // paths: `amm` (uniswap-v2/v3-shaped pools/pairs/swaps/tokens/factories) and `dex`
@@ -409,7 +418,12 @@ function buildTokenResponse(address: string, chain: string, opts: {
 // (native LUX first, then volume desc) into the GraphQL topTokens shape.
 async function handleTopTokens(chain: string): Promise<any> {
   const ranked = await getRankedTokens()
-  const tokens = ranked.map(t =>
+  // Curated tokens only — the subgraph indexes junk/test tokens (fake USDC/USDT); the
+  // token selector reads topTokens, so gate it to real Lux assets (same gate as
+  // /v1/swappable_tokens). Native LUX always passes.
+  const tokens = ranked
+    .filter(t => isCuratedAddress(t.address))
+    .map(t =>
     tokenResponseFromUsd(t.address, chain, {
       symbol: t.symbol,
       name: t.name,
@@ -470,7 +484,9 @@ async function handleTopV2Pairs(chain: string): Promise<any> {
   const bundle = await getBundle()
   const ethPrice = bundle ? parseFloat(bundle.ethPrice) : 0
 
-  const v2Pairs = pairs.map(p => {
+  const v2Pairs = pairs
+    .filter(p => isCuratedAddress(p.token0.id) && isCuratedAddress(p.token1.id))
+    .map(p => {
     const meta0 = getTokenMeta(p.token0.id)
     const meta1 = getTokenMeta(p.token1.id)
     return {
@@ -511,7 +527,9 @@ async function handleTopV3Pools(chain: string): Promise<any> {
   const [v3Bundle, v2Bundle] = await Promise.all([getV3Bundle(), getBundle()])
   const ethPrice = v3Bundle ? parseFloat(v3Bundle.ethPriceUSD) : (v2Bundle ? parseFloat(v2Bundle.ethPrice) : 0)
 
-  const v3Pools = pools.map(p => {
+  const v3Pools = pools
+    .filter(p => isCuratedAddress(p.token0.id) && isCuratedAddress(p.token1.id))
+    .map(p => {
     const meta0 = getTokenMeta(p.token0.id)
     const meta1 = getTokenMeta(p.token1.id)
     return {
