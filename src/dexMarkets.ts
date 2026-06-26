@@ -33,13 +33,17 @@
 
 import { createPublicClient, http, isAddress, getAddress, type Address, type PublicClient } from 'viem'
 import { cacheGet, cacheSet, TTL } from './cache'
+import { ACTIVE } from './networks'
 
 // ─── Network C-Chain RPC (for live asset verification) ──────────────────────
 //
 // The exchange-api is deployed PER NETWORK; LUX_RPC_URL is that deployment's own
-// C-Chain RPC. Calling it IS the "chainID matches" guarantee by construction — a
-// market's EVM tokens are verified against the same network the markets came from.
-const RPC_URL = process.env.LUX_RPC_URL || 'https://api.lux.network/ext/bc/C/rpc'
+// C-Chain RPC. The default is ACTIVE.rpcUrl — the one source of truth in
+// networks.ts for the NETWORK this process serves — NOT a hardcoded mainnet URL,
+// so a devnet/testnet deploy that forgets LUX_RPC_URL verifies against its OWN
+// chain, not mainnet. An explicit LUX_RPC_URL still wins (in-cluster wiring), and
+// assertRpcChainId() below proves at first use that it actually points at NETWORK.
+const RPC_URL = process.env.LUX_RPC_URL || ACTIVE.rpcUrl
 
 let _client: PublicClient | null = null
 function client(): PublicClient {
@@ -57,6 +61,35 @@ function client(): PublicClient {
 const DECIMALS_ABI = [
   { type: 'function', name: 'decimals', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint8' }] },
 ] as const
+
+// ─── chainID guard (red M1) ─────────────────────────────────────────────────
+//
+// The gate verifies every token against RPC_URL, so the whole policy is only
+// correct if RPC_URL points at NETWORK's own chain. If LUX_RPC_URL is overridden
+// to the wrong network (or the mainnet default leaks into a devnet deploy), every
+// real token "has no code" on that chain and is stripped — the surface goes
+// silently EMPTY and looks like "no markets yet" rather than a misconfig. Prove
+// eth_chainId === ACTIVE.chainId on first use and fail LOUD on mismatch (mirrors
+// the SUBGRAPH_URL fail-fast in graphql.ts). A transient RPC error is NOT memoized,
+// so it simply retries on the next poll; only a real mismatch throws.
+// checkChainId is the pure assertion (no network, no memo) — testable in isolation.
+export function checkChainId(actual: number): void {
+  if (actual !== ACTIVE.chainId) {
+    throw new Error(
+      `exchange-api RPC chainId mismatch: LUX_RPC_URL (${RPC_URL}) reports chainId ${actual}, ` +
+        `but NETWORK=${ACTIVE.name} expects ${ACTIVE.chainId}. The markets gate would verify token ` +
+        `contracts against the WRONG chain and strip every real market ("No active markets"). Point ` +
+        `LUX_RPC_URL at ${ACTIVE.name}'s own C-Chain RPC, or unset it to use the ${ACTIVE.name} default.`,
+    )
+  }
+}
+
+let _chainIdVerified = false
+export async function assertRpcChainId(): Promise<void> {
+  if (_chainIdVerified) return
+  checkChainId(await client().getChainId())
+  _chainIdVerified = true
+}
 
 // ─── Subgraph row shapes (only the fields the gate reads) ───────────────────
 
@@ -182,6 +215,12 @@ export async function filterRealMarkets(
   markets: RawMarket[],
   verify: AssetVerifier = verifyEvmAsset,
 ): Promise<{ markets: RawMarket[]; acceptedIds: Set<string> }> {
+  // Prove RPC_URL points at NETWORK before verifying anything against it (red M1).
+  // Only when using the real on-chain verifier — an injected mock (tests) needs no
+  // live RPC and bypasses the guard.
+  if (verify === verifyEvmAsset) {
+    await assertRpcChainId()
+  }
   const survivors: RawMarket[] = []
   for (const m of markets) {
     if (!isStructurallyReal(m)) {

@@ -5,10 +5,23 @@ import {
   isStructurallyReal,
   isCrossed,
   parseTokenRef,
+  checkChainId,
   type RawMarket,
   type AssetVerifier,
 } from './dexMarkets'
+import { ACTIVE } from './networks'
 import type { Address } from 'viem'
+
+// ── checkChainId: red M1 guard ──────────────────────────────────────────────
+test('checkChainId: accepts the active chain, rejects a wrong-chain RPC', () => {
+  // The RPC that matches NETWORK passes silently.
+  assert.doesNotThrow(() => checkChainId(ACTIVE.chainId))
+  // A different chainId (e.g. the mainnet default leaking into a devnet deploy)
+  // throws LOUD rather than letting the gate verify tokens against the wrong chain
+  // and silently strip every real market.
+  assert.throws(() => checkChainId(ACTIVE.chainId + 1), /chainId mismatch/)
+  assert.throws(() => checkChainId(ACTIVE.chainId + 1), new RegExp(`expects ${ACTIVE.chainId}`))
+})
 
 // Real synthetic-seed rows captured live from the devnet dex subgraph
 // (api-exchange.lux-dev.network). These are EXACTLY what the gate must reject.
