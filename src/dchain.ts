@@ -75,10 +75,31 @@ const httpGet: DexGet = async (path) => {
 // reads AND the extra DexMarket fields the FE renders (openOrders, remaining).
 // RawMarket carries an index signature, so the extra fields pass through
 // filterRealMarkets (which preserves the row objects) to the FE.
+// decodePoolSymbol recovers a human pair symbol from a venue market's `symbol`
+// field. A maker-seeded market is keyed by SymbolPoolID(symbol) (dex dex.go): the
+// human symbol ascii-packed left-aligned into 32 bytes with byte[31]=0xD0, and
+// dex_get_markets returns that poolId hex AS the symbol. So hex-decode and take the
+// leading printable-ASCII run (NUL / the 0xD0 marker / any non-printable byte ends
+// it) → e.g. "LUX/LUSD". A real keccak poolId (a V4 PoolKey hash) decodes to
+// non-printable bytes → '' → the row fails the symbol gate (correct: it carries no
+// human pair on this surface). A value that is already a human symbol (contains
+// '/', non-hex) is returned unchanged — forward-compatible with a venue that emits
+// the human symbol directly.
+export function decodePoolSymbol(s: string): string {
+  if (!/^[0-9a-fA-F]{2,64}$/.test(s)) return s
+  let out = ''
+  for (let i = 0; i + 1 < s.length; i += 2) {
+    const c = parseInt(s.slice(i, i + 2), 16)
+    if (c < 32 || c > 126) break
+    out += String.fromCharCode(c)
+  }
+  return out
+}
+
 export function marketToRaw(m: any): RawMarket {
   return {
     id: String(m?.poolId ?? ''),
-    symbol: String(m?.symbol ?? ''),
+    symbol: decodePoolSymbol(String(m?.symbol ?? '')),
     bestBid: String(m?.bestBid ?? 0),
     bestAsk: String(m?.bestAsk ?? 0),
     openOrders: Number(m?.orders ?? 0),

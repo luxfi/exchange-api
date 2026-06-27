@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   marketToRaw,
+  decodePoolSymbol,
   orderToFe,
   tradeToFill,
   firstArg,
@@ -40,6 +41,21 @@ test('marketToRaw maps read.go marketJSON to the FE DexMarket/RawMarket shape', 
   assert.equal(r.baseToken, MKT_LUSD.base)
   assert.equal(r.quoteToken, MKT_LUSD.quote)
   assert.equal(r.assetsBound, true)
+})
+
+test('decodePoolSymbol recovers the human pair from a SymbolPoolID poolId (the venue symbol field)', () => {
+  // dex SymbolPoolID('LUX/LUSD'): ascii left-aligned, byte[31]=0xD0; the venue's
+  // dex_get_markets returns this poolId hex AS `symbol`, so the gate (PAIR_SYMBOL)
+  // needs it decoded back to "LUX/LUSD" — the prod bug that hid the live market.
+  const poolHex = '4c55582f4c5553440000000000000000000000000000000000000000000000d0'
+  assert.equal(decodePoolSymbol(poolHex), 'LUX/LUSD')
+  assert.equal((marketToRaw({ ...MKT_LUSD, symbol: poolHex }) as any).symbol, 'LUX/LUSD')
+  // already-human symbol passes through unchanged (forward-compatible with a venue
+  // that emits the human symbol directly).
+  assert.equal(decodePoolSymbol('LUX/LUSD'), 'LUX/LUSD')
+  // a real keccak poolId (non-printable bytes) yields '' → the row fails the symbol
+  // gate, which is correct (it carries no human pair on this surface).
+  assert.equal(decodePoolSymbol('ab'.repeat(32)), '')
 })
 
 test('marketToRaw on an unbound placeholder: empty asset refs, assetsBound false', () => {
