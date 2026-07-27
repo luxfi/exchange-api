@@ -25,7 +25,7 @@
 
 import type { Request, Response } from 'express'
 import type { Address } from 'viem'
-import { getRankedTokens, type RankedToken } from './subgraph'
+import { getRankedTokens, getSubgraphV3Pools, getV3ProtocolDays, capUsd, type RankedToken, type ProtocolDay } from './subgraph'
 import { bestRoute, toWrapped } from './dexRouter'
 import { cacheGet, cacheSet, TTL } from './cache'
 import { ACTIVE } from './networks'
@@ -253,6 +253,76 @@ const EMPTY_TVL = { v2: [], v3: [], v4: [] }
 const EMPTY_VOLUME_SPLIT = { v2: [], v3: [], v4: [] }
 const EMPTY_HISTORICAL_VOLUME = { Month: EMPTY_VOLUME_SPLIT, Year: EMPTY_VOLUME_SPLIT, Max: EMPTY_VOLUME_SPLIT }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Protocol TVL / volume series. The FE's explore tiles (Total TVL, 1D volume,
+// per-version TVL) read the LAST TWO points of these series — latest for the
+// number, previous for the % change — so a series is only useful if it carries
+// at least the two most recent days. Everything Lux trades is V3; v2/v4 stay
+// empty rather than duplicating the same numbers under another version.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DAY = 86400
+const WINDOW_DAYS = { Month: 30, Year: 365, Max: 100000 }
+
+function series(days: ProtocolDay[], pick: (d: ProtocolDay) => number): { timestamp: number; value: number }[] {
+  return days.map((d) => ({ timestamp: d.date, value: pick(d) }))
+}
+
+function withinDays(days: ProtocolDay[], window: number): ProtocolDay[] {
+  if (days.length === 0) return days
+  const cutoff = days[days.length - 1].date - window * DAY
+  return days.filter((d) => d.date >= cutoff)
+}
+
+function buildProtocolStats(days: ProtocolDay[]): {
+  dailyProtocolTvl: Record<string, unknown>
+  historicalProtocolVolume: Record<string, unknown>
+} {
+  if (days.length === 0) {
+    return { dailyProtocolTvl: EMPTY_TVL, historicalProtocolVolume: EMPTY_HISTORICAL_VOLUME }
+  }
+  const volumeFor = (window: number) => ({
+    v2: [],
+    v3: series(withinDays(days, window), (d) => d.volumeUSD),
+    v4: [],
+  })
+  return {
+    dailyProtocolTvl: { v2: [], v3: series(days, (d) => d.tvlUSD), v4: [] },
+    historicalProtocolVolume: {
+      Month: volumeFor(WINDOW_DAYS.Month),
+      Year: volumeFor(WINDOW_DAYS.Year),
+      Max: volumeFor(WINDOW_DAYS.Max),
+    },
+  }
+}
+
+// V3 pool → PoolStats (proto3 JSON). token0/token1 are TokenStats; the FE's pool
+// table drops a row whose tokens lack symbol/name, so both are always emitted.
+function toPoolStats(p: Record<string, any>): Record<string, unknown> {
+  const tok = (t: Record<string, any> | undefined): Record<string, unknown> => ({
+    chain: LUX_CHAIN,
+    address: String(t?.id || '').toLowerCase(),
+    symbol: t?.symbol || 'UNKNOWN',
+    name: t?.name || t?.symbol || 'Unknown Token',
+    decimals: parseInt(t?.decimals, 10) || 18,
+    standard: 'ERC20',
+  })
+  const stat: Record<string, unknown> = {
+    id: String(p.id).toLowerCase(),
+    chain: LUX_CHAIN,
+    protocolVersion: 'V3',
+    feeTier: parseInt(p.feeTier, 10) || 0,
+    txCount: parseInt(p.txCount, 10) || 0,
+    token0: tok(p.token0),
+    token1: tok(p.token1),
+  }
+  const tvl = capUsd(p.totalValueLockedUSD)
+  const vol = capUsd(p.volumeUSD)
+  if (tvl > 0) stat.totalLiquidity = usd(tvl)
+  if (vol > 0) stat.volume1Day = usd(vol)
+  return stat
+}
+
 function emptyExploreStats(): Record<string, unknown> {
   return {
     stats: {
@@ -289,22 +359,24 @@ export async function handleExploreStats(req: Request, res: Response): Promise<v
       return
     }
 
-    const ranked = await getRankedTokens()
+    const [ranked, v3Pools, days] = await Promise.all([getRankedTokens(), getSubgraphV3Pools(200), getV3ProtocolDays()])
     // Enrich each token with an on-chain USD price (one unit → LUSD). Parallel;
     // priceTokenUsd never throws, so a dead route degrades that token to 0.
     const prices = await Promise.all(
       ranked.map((t) => (t.priceUSD > 0 ? Promise.resolve(t.priceUSD) : priceTokenUsd(t.address, t.decimals, t.symbol))),
     )
     const tokenStats = ranked.map((t, i) => toTokenStats(t, prices[i]))
+    const poolStatsV3 = v3Pools.map(toPoolStats)
 
     const response = {
       stats: {
         tokenStats,
-        poolStats: [],
-        poolStatsV3: [],
+        // poolStats is the FE's combined table; V3 is the only live venue, so it
+        // and poolStatsV3 carry the same rows rather than one of them being empty.
+        poolStats: poolStatsV3,
+        poolStatsV3,
         transactionStats: [],
-        dailyProtocolTvl: EMPTY_TVL,
-        historicalProtocolVolume: EMPTY_HISTORICAL_VOLUME,
+        ...buildProtocolStats(days),
         topTokens: { hourly: [], daily: tokenStats },
       },
     }
@@ -324,7 +396,22 @@ export async function handleProtocolStats(req: Request, res: Response): Promise<
   if ('error' in parsed) {
     return connectError(res, 'invalid_argument', parsed.error)
   }
-  // No protocol-level TVL/volume time series on the native graph yet; return the
-  // empty (well-formed) envelope so the charts render flat instead of erroring.
-  res.json({ dailyProtocolTvl: EMPTY_TVL, historicalProtocolVolume: EMPTY_HISTORICAL_VOLUME })
+  if (!chainIsServed(parsed.value.chainId)) {
+    res.json({ dailyProtocolTvl: EMPTY_TVL, historicalProtocolVolume: EMPTY_HISTORICAL_VOLUME })
+    return
+  }
+  try {
+    const cacheKey = 'explore:protocolStats'
+    const cached = cacheGet(cacheKey) as Record<string, unknown> | null
+    if (cached) {
+      res.json(cached)
+      return
+    }
+    const response = buildProtocolStats(await getV3ProtocolDays())
+    cacheSet(cacheKey, response, TTL.SHORT)
+    res.json(response)
+  } catch (e) {
+    console.error('[explore] ProtocolStats:', e)
+    connectError(res, 'internal', 'Internal server error')
+  }
 }

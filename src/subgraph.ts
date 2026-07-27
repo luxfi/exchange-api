@@ -168,6 +168,41 @@ export async function getV3Bundle(): Promise<{ ethPriceUSD: string } | null> {
   return data?.bundle || null
 }
 
+// Protocol-level day series from the V3 subgraph (uniswapDayDatas). One row per
+// UTC day the protocol saw activity: cumulative TVL at end of day + that day's
+// volume. This is the ONLY source for the explore page's TVL / 1D-volume tiles
+// and the protocol charts — pool and token entities carry lifetime totals, not a
+// series.
+export interface ProtocolDay {
+  date: number // unix seconds, start of the UTC day
+  tvlUSD: number
+  volumeUSD: number
+  txCount: number
+}
+
+export async function getV3ProtocolDays(days: number = 1000): Promise<ProtocolDay[]> {
+  const data = await querySubgraphV3(`{
+    uniswapDayDatas(first: ${days}, orderBy: date, orderDirection: desc) {
+      date
+      tvlUSD
+      volumeUSD
+      txCount
+    }
+  }`)
+  const rows: any[] = data?.uniswapDayDatas || []
+  // Ascending by date, overflow-capped exactly like the token/pool numbers: a
+  // tiny pool can produce a 1e30 "volume" the FE would render as the headline.
+  return rows
+    .map((r) => ({
+      date: Number(r.date),
+      tvlUSD: capUsd(r.tvlUSD),
+      volumeUSD: capUsd(r.volumeUSD),
+      txCount: parseInt(r.txCount || '0', 10) || 0,
+    }))
+    .filter((r) => Number.isFinite(r.date) && r.date > 0)
+    .sort((a, b) => a.date - b.date)
+}
+
 // Get V3 swaps
 export async function getSubgraphV3Swaps(first: number = 50): Promise<any[]> {
   const data = await querySubgraphV3(`{
@@ -210,6 +245,14 @@ export interface RankedToken {
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 const STABLECOINS = new Set(['USDT', 'USDC', 'LUSD', 'DAI', 'BUSD'])
 const OVERFLOW_CAP = 1e12 // decimal-overflow artifacts from tiny pools → drop to 0
+
+// Parse a subgraph USD string, dropping decimal-overflow artifacts to 0. One
+// definition, used by both the token derivation and the protocol day series.
+export function capUsd(v: string | number | undefined | null): number {
+  const n = typeof v === 'number' ? v : parseFloat(String(v ?? '0'))
+  if (!Number.isFinite(n) || n < 0 || n > OVERFLOW_CAP) return 0
+  return n
+}
 
 function deriveUsd(opts: {
   symbol: string
