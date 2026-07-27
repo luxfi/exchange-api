@@ -10,8 +10,15 @@ import { ACTIVE } from './networks'
 // D-Chain read surface (dchain.ts), split by dexRouting.isDexQuery. Both V2/V3 helpers point at the one
 // `amm` subgraph; V4 swaps surface as both pools and pairs there. Override
 // per-environment via SUBGRAPH_URL (same knob graphql.ts reads for AMM_GRAPH).
+// Three sources, three knobs — they are NOT the same schema, so one URL cannot
+// serve all three:
+//   SUBGRAPH_URL     the AMM graph the FE's raw /v1/graphql queries proxy to
+//                    (graphql.ts). The FE sends the v3 schema.
+//   SUBGRAPH_V2_URL  the v2-shaped helpers (pairs/uniswapFactories/reserveUSD).
+//   SUBGRAPH_V3_URL  the v3-shaped helpers (pools/factories/bundle.ethPriceUSD).
+// Each defaults to SUBGRAPH_URL so a single-graph deployment stays a single knob.
 const AMM_GRAPH = process.env.SUBGRAPH_URL || ACTIVE.subgraphUrl
-const SUBGRAPH_V2_URL = AMM_GRAPH
+const SUBGRAPH_V2_URL = process.env.SUBGRAPH_V2_URL || AMM_GRAPH
 const SUBGRAPH_V3_URL = process.env.SUBGRAPH_V3_URL || AMM_GRAPH
 
 // Query a subgraph endpoint
