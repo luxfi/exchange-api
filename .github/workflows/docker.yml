@@ -37,9 +37,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           UNIVERSE_PAT: ${{ secrets.UNIVERSE_PAT }}
+          # orgs/luxfi provisions GHCR_TOKEN + GHCR_USER and nothing else -- no
+          # GH_PAT, no UNIVERSE_PAT. GHCR_TOKEN must be a real GitHub PAT for
+          # ghcr.io to accept it, so it can resolve private modules too.
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
           tok="$GH_TOKEN"; src="GH_TOKEN"
           if [ -z "$tok" ]; then tok="$UNIVERSE_PAT"; src="UNIVERSE_PAT"; fi
+          if [ -z "$tok" ]; then tok="$GHCR_TOKEN"; src="GHCR_TOKEN"; fi
           if [ -z "$tok" ]; then
             echo "::error::No GH_TOKEN or UNIVERSE_PAT secret set — cannot push to the unlinked ghcr package"
             exit 1
