@@ -27,8 +27,17 @@ const isCuratedAddress = (addr?: string | null): boolean =>
 // adapter, otherwise → AMM_GRAPH (see proxyToNativeGraph). This REPLACES the dead
 // `/v1/graph/cchain/dex/graphql` subgraph derivation (that route 404s on the
 // deployed explorer; the native CLOB lives on the D-Chain, not the C-Chain graph).
-const AMM_GRAPH = process.env.SUBGRAPH_URL ||
-  'http://explorer.lux-mainnet.svc:8090/v1/graph/cchain/amm/graphql'
+//
+// The default is ACTIVE.subgraphUrl — the network's own graph — NOT a hardcoded
+// host. This line read cchain's, so the two modules that resolve this one value
+// disagreed: subgraph.ts followed the network and this one always went to Lux.
+// With SUBGRAPH_URL set both landed in the same place and the split was
+// invisible. Zoo's deployment dropped the override once `zoo` was a real network
+// entry, and the disagreement surfaced immediately — shaped responses came from
+// Zoo's graph while every raw query went to Lux's, so zoo.exchange printed
+// $126.0K of PROTOCOL TVL over a table of WLUX and LZOO while its own factory
+// held $204,000 in WZOO/ZUSD.
+const AMM_GRAPH = process.env.SUBGRAPH_URL || ACTIVE.subgraphUrl
 
 // acceptedMarketIds resolves the set of REAL market ids for the dex graph by
 // fetching its markets once and running them through the real-asset gate. It is the
