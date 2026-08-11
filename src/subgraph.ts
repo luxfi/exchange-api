@@ -1,6 +1,6 @@
 import fetch from 'node-fetch'
 import { cacheGet, cacheSet, TTL } from './cache'
-import { getTokenMeta, LUX_TOKENS } from './lux-tokens'
+import { getTokenMeta } from './lux-tokens'
 import { ACTIVE } from './networks'
 
 // Data source is the NATIVE Lux graph engine (luxfi/graph) embedded in the
@@ -346,9 +346,13 @@ export async function getRankedTokens(): Promise<RankedToken[]> {
       }
     })
   } else {
-    // Native graph has not indexed tokens yet: fall back to the curated list,
-    // unpriced (the native graph is the only volume/price source).
-    ranked = LUX_TOKENS.filter((t) => t.address !== ZERO_ADDRESS).map((t) => ({
+    // Native graph has not indexed tokens yet: fall back to THIS network's
+    // curated list, unpriced (the native graph is the only volume/price source).
+    // It read LUX_TOKENS unconditionally, so zoo.exchange — whose graph is empty
+    // until its AMM lands — listed Lux's WLUX, LETH, LBTC and seventeen more as
+    // ZOO-chain tokens at $0 each. A network with nothing curated yet lists
+    // nothing, which is the true answer.
+    ranked = ACTIVE.tokens.filter((t) => t.address !== ZERO_ADDRESS).map((t) => ({
       address: t.address.toLowerCase(),
       symbol: t.symbol,
       name: t.name,

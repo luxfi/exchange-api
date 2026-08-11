@@ -17,6 +17,7 @@
 // deploy lands per network.
 
 import { getAddress, type Address } from 'viem'
+import { LUX_TOKENS, ZOO_TOKENS, type TokenMeta } from './lux-tokens'
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 const MULTICALL3 = getAddress('0xd25F88CBdAe3c2CCA3Bb75FC4E723b44C0Ea362F')
@@ -44,6 +45,11 @@ export interface NetworkConfig {
   name: string
   chainId: number
   coin: NativeCoin
+  // The curated registry for THIS chain — what the token surfaces fall back to
+  // when the graph has indexed nothing yet. It used to read LUX_TOKENS
+  // unconditionally, so a Zoo deployment with an empty graph listed Lux's WLUX,
+  // LETH, LBTC and seventeen more as ZOO-chain tokens, every one priced at zero.
+  tokens: TokenMeta[]
   rpcUrl: string
   subgraphUrl: string
   // dexDchainUrl is the native V4 CLOB (D-Chain) read base — the chain route
@@ -60,6 +66,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     name: 'mainnet',
     chainId: 96369,
     coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://lux.exchange/assets/lux_app_logo-4TeLXZ7D.svg' },
+    tokens: LUX_TOKENS,
     rpcUrl: 'https://api.lux.network/v1/bc/C/rpc',
     subgraphUrl: 'http://explorer.lux-mainnet.svc:8090/v1/graph/cchain/amm/graphql',
     dexDchainUrl: 'http://luxd-0.luxd-headless.lux-mainnet.svc:9630/v1/bc/D',
@@ -76,6 +83,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     name: 'testnet',
     chainId: 96368,
     coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://lux.exchange/assets/lux_app_logo-4TeLXZ7D.svg' },
+    tokens: LUX_TOKENS,
     rpcUrl: 'https://api.lux-test.network/v1/bc/C/rpc',
     subgraphUrl: 'http://explorer.lux-testnet.svc:8090/v1/graph/cchain/amm/graphql',
     dexDchainUrl: 'http://luxd-0.luxd-headless.lux-testnet.svc:9640/v1/bc/D',
@@ -95,6 +103,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     name: 'devnet',
     chainId: 96367,
     coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://lux.exchange/assets/lux_app_logo-4TeLXZ7D.svg' },
+    tokens: LUX_TOKENS,
     rpcUrl: 'https://api.lux-dev.network/v1/bc/C/rpc',
     subgraphUrl: 'http://explorer.lux-devnet.svc:8090/v1/graph/cchain/amm/graphql',
     dexDchainUrl: 'http://luxd-0.luxd-headless.lux-devnet.svc:9650/v1/bc/D',
@@ -120,6 +129,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     name: 'zoo',
     chainId: 200200,
     coin: { symbol: 'ZOO', name: 'Zoo', logoUrl: 'https://zoo.exchange/logo.svg' },
+    tokens: ZOO_TOKENS,
     // Zoo's node runs in zoo-k8s, so there is no in-cluster name for it from
     // lux-k8s and the raw :9630 LB is firewalled to non-DigitalOcean sources.
     // Answers eth_chainId 0x30e08.
@@ -142,6 +152,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     name: 'localnet',
     chainId: 31337,
     coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://lux.exchange/assets/lux_app_logo-4TeLXZ7D.svg' },
+    tokens: LUX_TOKENS,
     rpcUrl: 'http://127.0.0.1:9650/v1/bc/C/rpc',
     subgraphUrl: 'http://127.0.0.1:8090/v1/graph/cchain/amm/graphql',
     dexDchainUrl: 'http://127.0.0.1:9650/v1/bc/D',
