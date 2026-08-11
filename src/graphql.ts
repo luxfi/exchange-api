@@ -6,6 +6,7 @@ import { getTokenMeta } from './lux-tokens'
 import { filterRealMarkets, type RawMarket } from './dexMarkets'
 import { isDexQuery } from './dexRouting'
 import { queryDChain, fetchMarkets } from './dchain'
+import { ACTIVE } from './networks'
 
 // Real-asset gate for the AMM token/pool surfaces. The native graph indexes junk/test
 // tokens (e.g. fake USDC/USDT contracts) that are NOT real Lux assets; a token surfaces
@@ -299,12 +300,17 @@ async function handleToken(chain: string, address: string | null): Promise<any> 
   if (!address || address === '0x0000000000000000000000000000000000000000') {
     return {
       data: {
+        // Same source as the ranked list's leading row (subgraph.ts): the coin
+        // belongs to the network this process serves. This branch used to carry
+        // its own `chain === 'LUX' ? … : 'ZOO'` — a second, differently-written
+        // answer to one question, which named every non-Lux chain ZOO and served
+        // Lux's logo to all of them.
         token: buildTokenResponse('0x0000000000000000000000000000000000000000', chain, {
-          symbol: chain === 'LUX' ? 'LUX' : 'ZOO',
-          name: chain === 'LUX' ? 'Lux' : 'Zoo',
+          symbol: ACTIVE.coin.symbol,
+          name: ACTIVE.coin.name,
           decimals: 18,
           derivedETH: '1',
-          logoUrl: 'https://explore.lux.network/assets/lux_logo.svg',
+          logoUrl: ACTIVE.coin.logoUrl ?? undefined,
           ethPrice,
         }),
       },

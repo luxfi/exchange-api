@@ -365,17 +365,21 @@ export async function getRankedTokens(): Promise<RankedToken[]> {
   ranked = ranked.filter((t) => Number.isFinite(t.decimals))
   ranked.sort((a, b) => b.volumeUSD - a.volumeUSD)
 
-  const native = LUX_TOKENS[0] // zero-sentinel native LUX
+  // The chain's own coin leads the list. Its identity comes from the NETWORK,
+  // not from position 0 of the curated Lux list — reading that labelled the
+  // native row "LUX" on every deployment, so zoo.exchange opened its token list
+  // with a coin called LUX on chain ZOO. Address and decimals are the same
+  // everywhere: the zero sentinel, 18.
   const result: RankedToken[] = [
     {
-      address: native.address.toLowerCase(),
-      symbol: native.symbol,
-      name: native.name,
-      decimals: native.decimals,
+      address: ZERO_ADDRESS,
+      symbol: ACTIVE.coin.symbol,
+      name: ACTIVE.coin.name,
+      decimals: 18,
       priceUSD: 0,
       volumeUSD: 0,
       tvlUSD: 0,
-      logoUrl: native.logoUrl,
+      logoUrl: ACTIVE.coin.logoUrl,
     },
     ...ranked.filter((t) => t.address !== ZERO_ADDRESS),
   ]

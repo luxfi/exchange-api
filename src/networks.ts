@@ -30,9 +30,20 @@ export interface NetworkContracts {
   MULTICALL3: Address
 }
 
+// The chain's own coin, at the zero-address sentinel. It is a property of the
+// NETWORK, not a constant: the curated list in lux-tokens.ts opens with Lux's,
+// so reading position 0 there labelled every deployment's native coin "LUX" —
+// zoo.exchange's token list led with a row called LUX on chain ZOO.
+export interface NativeCoin {
+  symbol: string
+  name: string
+  logoUrl: string | null
+}
+
 export interface NetworkConfig {
   name: string
   chainId: number
+  coin: NativeCoin
   rpcUrl: string
   subgraphUrl: string
   // dexDchainUrl is the native V4 CLOB (D-Chain) read base — the chain route
@@ -48,6 +59,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
   mainnet: {
     name: 'mainnet',
     chainId: 96369,
+    coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://lux.exchange/assets/lux_app_logo-4TeLXZ7D.svg' },
     rpcUrl: 'https://api.lux.network/v1/bc/C/rpc',
     subgraphUrl: 'http://explorer.lux-mainnet.svc:8090/v1/graph/cchain/amm/graphql',
     dexDchainUrl: 'http://luxd-0.luxd-headless.lux-mainnet.svc:9630/v1/bc/D',
@@ -63,6 +75,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
   testnet: {
     name: 'testnet',
     chainId: 96368,
+    coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://lux.exchange/assets/lux_app_logo-4TeLXZ7D.svg' },
     rpcUrl: 'https://api.lux-test.network/v1/bc/C/rpc',
     subgraphUrl: 'http://explorer.lux-testnet.svc:8090/v1/graph/cchain/amm/graphql',
     dexDchainUrl: 'http://luxd-0.luxd-headless.lux-testnet.svc:9640/v1/bc/D',
@@ -81,6 +94,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
   devnet: {
     name: 'devnet',
     chainId: 96367,
+    coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://lux.exchange/assets/lux_app_logo-4TeLXZ7D.svg' },
     rpcUrl: 'https://api.lux-dev.network/v1/bc/C/rpc',
     subgraphUrl: 'http://explorer.lux-devnet.svc:8090/v1/graph/cchain/amm/graphql',
     dexDchainUrl: 'http://luxd-0.luxd-headless.lux-devnet.svc:9650/v1/bc/D',
@@ -93,9 +107,41 @@ export const NETWORKS: Record<string, NetworkConfig> = {
       MULTICALL3,
     },
   },
+  // Zoo's own chain. Not a Lux network — a sovereign L1 with its own primary
+  // network — but it is a network this image serves, which is what this table
+  // is for. zoo.exchange ran against NETWORK=mainnet before this entry existed,
+  // which meant chainId 96369 on Zoo's RPC: the markets gate's chainId assertion
+  // fired on every poll, and the router quoted against Lux's V3 addresses.
+  //
+  // Contracts are zero because Zoo's AMM is mid-deploy. The router reads a zero
+  // QuoterV2/Factory as "no V3 venue" and returns no quote, which is the honest
+  // answer until they land — fill them in then, the way testnet's were.
+  zoo: {
+    name: 'zoo',
+    chainId: 200200,
+    coin: { symbol: 'ZOO', name: 'Zoo', logoUrl: 'https://zoo.exchange/logo.svg' },
+    // Zoo's node runs in zoo-k8s, so there is no in-cluster name for it from
+    // lux-k8s and the raw :9630 LB is firewalled to non-DigitalOcean sources.
+    // Answers eth_chainId 0x30e08.
+    rpcUrl: 'https://api.zoo.network/v1/bc/C/rpc',
+    subgraphUrl: 'http://explorer.lux-mainnet.svc:8090/v1/graph/zoo/amm/graphql',
+    // Zoo has no D-Chain; this 404s and the CLOB surface renders "No active
+    // markets". Named anyway, because the alternative to a wrong answer here is
+    // Lux's order book showing up on a Zoo site.
+    dexDchainUrl: 'https://api.zoo.network/v1/bc/D',
+    contracts: {
+      WLUX: ZERO,
+      LUSD: ZERO,
+      V3_QUOTER_V2: ZERO,
+      V3_SWAP_ROUTER_02: ZERO,
+      V3_FACTORY: ZERO,
+      MULTICALL3,
+    },
+  },
   localnet: {
     name: 'localnet',
     chainId: 31337,
+    coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://lux.exchange/assets/lux_app_logo-4TeLXZ7D.svg' },
     rpcUrl: 'http://127.0.0.1:9650/v1/bc/C/rpc',
     subgraphUrl: 'http://127.0.0.1:8090/v1/graph/cchain/amm/graphql',
     dexDchainUrl: 'http://127.0.0.1:9650/v1/bc/D',
