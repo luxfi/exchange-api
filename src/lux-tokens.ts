@@ -83,7 +83,12 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'LZOO',
     name: 'Lux ZOO',
     decimals: 18,
-    logoUrl: 'https://cdn.lux.network/exchange/icon-png/lzoo.png',
+    // Zoo's own mark, in Zoo's own colours. The exchange CDN's lzoo.png is the
+    // name set in one flat colour; the asset's mark is the CMYK circles.
+    logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo.svg',
+    // The same asset Zoo's coin is, so it reads one price on either chain
+    // rather than $0.0000204 here against $0.00000987 there.
+    upstream: 'zoo',
   },
   {
     address: '0x0e4bD0DD67c15dECfBBBdbbE07FC9d51D737693D',

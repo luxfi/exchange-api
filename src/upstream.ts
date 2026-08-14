@@ -32,6 +32,24 @@ const FEED = 'https://api.coingecko.com/api/v3/simple/price'
 const WORLD_KEY = 'upstream:world'
 const ZERO = '0x0000000000000000000000000000000000000000'
 
+/**
+ * The assets we issue, and the chain each one calls home.
+ *
+ * Named here rather than inferred from the network list, because an asset and a
+ * network are not the same thing and only coincidentally share a word: 'zoo'
+ * happens to be both, 'lux' is an asset whose home network is called 'mainnet'.
+ * Testing for a network silently answered no for LUX, so LUX and ZLUX went on
+ * disagreeing while ZOO converged.
+ *
+ * Home is where the asset's supply is declared — its coin's row on its own
+ * chain — which is what makes 2 trillion the answer on both chains rather than
+ * whatever slice happens to be bridged to the one you are looking at.
+ */
+const ASSETS: Record<string, { home: string }> = {
+  lux: { home: 'mainnet' },
+  zoo: { home: 'zoo' },
+}
+
 /** Every place we price this asset: the tokens across our chains that claim it. */
 function venues(asset: string): Array<{ network: string; address: string }> {
   const out: Array<{ network: string; address: string }> = []
@@ -45,8 +63,8 @@ function venues(asset: string): Array<{ network: string; address: string }> {
   return out
 }
 
-/** An asset we price ourselves is one at least one of our chains claims. */
-const isOurs = (asset: string): boolean => venues(asset).length > 0 && !asset.includes('-') && asset === asset.toLowerCase() && !!NETWORKS[asset]
+/** An asset we price ourselves is one we issue. */
+const isOurs = (asset: string): boolean => asset in ASSETS
 
 /**
  * USD prices for the assets named, keyed by the name given.
@@ -167,4 +185,57 @@ async function ourPrice(asset: string): Promise<number | undefined> {
   }
   cacheSet(key, price, TTL.SHORT)
   return price
+}
+
+/**
+ * What an asset we issue has minted, and how much of it is loose — from the
+ * chain that declares it.
+ *
+ * A bridged slice is not a supply. LZOO's row on Lux holds the 10.86 billion
+ * bridged there, so its page valued that as if it were the whole asset and
+ * reported a fully diluted value of $221K against ZOO's $19.7M — the same token,
+ * two answers, and neither the truth on its own. The asset's supply is declared
+ * once, on its home chain's coin, and is 2 trillion whichever side you look from.
+ */
+export async function upstreamSupply(
+  asset: string,
+): Promise<{ totalSupply: number; circulating: number } | undefined> {
+  const home = ASSETS[asset]?.home
+  if (!home || !NETWORKS[home]) {
+    return undefined
+  }
+  const key = `upstream:supply:${asset}`
+  const cached = cacheGet(key) as { totalSupply: number; circulating: number } | null
+  if (cached) {
+    return cached
+  }
+  // The coin has no contract, so its figures ride on the wrapped native's row —
+  // the one entity a token page opens for the chain's own coin.
+  const wrapped = NETWORKS[home].contracts.WLUX?.toLowerCase()
+  if (!wrapped || wrapped === ZERO) {
+    return undefined
+  }
+  try {
+    const res = await fetch(NETWORKS[home].subgraphUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `{ tokens(first: 1, where: { id: "${wrapped}" }) { totalSupply staked } }`,
+      }),
+      signal: AbortSignal.timeout(4000),
+    })
+    const row = ((await res.json()) as any)?.data?.tokens?.[0]
+    const total = parseFloat(row?.totalSupply ?? '')
+    if (!Number.isFinite(total) || total <= 0) {
+      return undefined
+    }
+    const staked = parseFloat(row?.staked ?? '')
+    const locked = Number.isFinite(staked) && staked > 0 ? Math.min(staked, total) : 0
+    const out = { totalSupply: total, circulating: total - locked }
+    cacheSet(key, out, TTL.SHORT)
+    return out
+  } catch (e) {
+    console.error(`upstream supply ${asset} unavailable:`, e)
+    return undefined
+  }
 }

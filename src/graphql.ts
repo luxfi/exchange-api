@@ -7,7 +7,7 @@ import { filterRealMarkets, type RawMarket } from './dexMarkets'
 import { isDexQuery } from './dexRouting'
 import { queryDChain, fetchMarkets } from './dchain'
 import { ACTIVE, getTokenMeta } from './networks'
-import { upstreamPrices } from './upstream'
+import { upstreamPrices, upstreamSupply } from './upstream'
 
 // Real-asset gate for the AMM token/pool surfaces. The native graph indexes junk/test
 // tokens (e.g. fake USDC/USDT contracts) that are NOT real Lux assets; a token surfaces
@@ -426,13 +426,18 @@ async function handleToken(chain: string, address: string | null): Promise<any> 
   const sg = subgraphTokens.find(t => t.id.toLowerCase() === address.toLowerCase())
   // The supply is on the same indexer row as the price. Read here so a token's
   // own page states the same valuation the ranked table does.
+  // An asset we issue declares its supply once, on its home chain; what sits in
+  // this chain's row is only the slice bridged here.
+  const declared = meta?.upstream ? await upstreamSupply(meta.upstream) : undefined
   const total = parseFloat(sg?.totalSupply || '')
   const staked = parseFloat(sg?.staked || '')
-  const totalSupply = Number.isFinite(total) && total > 0 ? total : undefined
+  const local = Number.isFinite(total) && total > 0 ? total : undefined
+  const totalSupply = declared?.totalSupply ?? local
   const circulating =
-    totalSupply === undefined
+    declared?.circulating ??
+    (local === undefined
       ? undefined
-      : totalSupply - (Number.isFinite(staked) && staked > 0 ? Math.min(staked, totalSupply) : 0)
+      : local - (Number.isFinite(staked) && staked > 0 ? Math.min(staked, local) : 0))
 
   return {
     data: {

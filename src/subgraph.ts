@@ -2,7 +2,7 @@ import fetch from 'node-fetch'
 import { cacheGet, cacheSet, TTL } from './cache'
 
 import { ACTIVE, getTokenMeta } from './networks'
-import { upstreamPrices } from './upstream'
+import { upstreamPrices, upstreamSupply } from './upstream'
 
 // Data source is the NATIVE Lux graph engine (luxfi/graph) embedded in the
 // explorer — NOT a hosted The-Graph node and NOT Uniswap's gateway. This module
@@ -323,7 +323,17 @@ export function deriveUsd(opts: {
  * draws a dash. Valuing an unknown supply produces a figure with no meaning,
  * and zero would claim a token worth nothing.
  */
-function supplyOf(t: { totalSupply?: string; staked?: string }): { totalSupply?: number; circulating?: number } {
+function supplyOf(
+  t: { totalSupply?: string; staked?: string },
+  asset?: string,
+  assetSupplies?: Map<string, { totalSupply: number; circulating: number }>,
+): { totalSupply?: number; circulating?: number } {
+  // An asset we issue has one supply, declared on its home chain. What sits in
+  // this chain's row is the slice bridged here.
+  const declared = asset ? assetSupplies?.get(asset) : undefined
+  if (declared) {
+    return declared
+  }
   const total = parseFloat(t.totalSupply || '')
   if (!Number.isFinite(total) || total <= 0) {
     return {}
@@ -345,7 +355,7 @@ export async function getRankedTokens(): Promise<RankedToken[]> {
       ? parseFloat(v2Bundle.ethPrice)
       : 0
 
-  const [v2Tokens, v3Tokens, v2Pairs, v3Pools, upstreamUsd] = await Promise.all([
+  const [v2Tokens, v3Tokens, v2Pairs, v3Pools, upstreamUsd, upstreamSupplies] = await Promise.all([
     getSubgraphTokens(100),
     getSubgraphV3Tokens(100),
     getSubgraphPairs(200),
@@ -353,6 +363,11 @@ export async function getRankedTokens(): Promise<RankedToken[]> {
     // One request covers every asset with an upstream, so the whole ranked
     // list is priced from one snapshot and no two rows disagree about ether.
     upstreamPrices(ACTIVE.tokens.map((t) => t.upstream).filter((id): id is string => !!id)),
+    // The assets we issue declare their supply once, on their home chain. A
+    // bridged slice is not a supply: LZOO's row holds what is bridged to Lux, so
+    // valuing that as the whole asset put $221K on a page whose other side said
+    // $19.7M.
+    assetSupplies(ACTIVE.tokens.map((t) => t.upstream).filter((id): id is string => !!id)),
   ])
 
   // Swappable iff token is token0/token1 of a real pair/pool. Excludes the LP/pair
@@ -400,7 +415,7 @@ export async function getRankedTokens(): Promise<RankedToken[]> {
         name: meta?.name || t.name || 'Unknown Token',
         decimals: meta?.decimals ?? parseInt(t.decimals, 10),
         ...usd,
-        ...supplyOf(t),
+        ...supplyOf(t, getTokenMeta(t.id)?.upstream, upstreamSupplies),
         logoUrl: meta?.logoUrl ?? null,
       }
     })
@@ -452,4 +467,21 @@ export async function getRankedTokens(): Promise<RankedToken[]> {
   // real tokens (more than just native LUX).
   if (result.length > 1) cacheSet(cacheKey, result, TTL.SHORT)
   return result
+}
+
+
+/** The supplies of the assets we issue, resolved once and shared by every view. */
+async function assetSupplies(
+  ids: string[],
+): Promise<Map<string, { totalSupply: number; circulating: number }>> {
+  const out = new Map<string, { totalSupply: number; circulating: number }>()
+  await Promise.all(
+    [...new Set(ids)].map(async (id) => {
+      const s = await upstreamSupply(id)
+      if (s) {
+        out.set(id, s)
+      }
+    }),
+  )
+  return out
 }
