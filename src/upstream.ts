@@ -1,17 +1,20 @@
 // What an asset is worth off this chain.
 //
 // A token that represents something traded elsewhere — ETH, BTC, SOL, a dollar
-// — has a price the world already agrees on, and this chain's pools are not a
-// second opinion on it. Several of them were seeded at round token ratios and
-// never traded: the LETH/LUSD pool quotes 0.75 and the LBTC/LUSD pool 1.5, so
-// the token pages read $0.75 for ether and $1.50 for bitcoin. A pool with no
-// liquidity still sets a price, and the price it sets is whatever it was
-// seeded at.
+// — has a price the world already agrees on, and one thin pool here is not a
+// second opinion on it.
+//
+// These assets trade, heavily: 435,444 swaps across seventeen pools on the Lux
+// C-Chain, 145,386 of them in WLUX/LETH alone. But every route to a dollar
+// disagrees. Ether prices at $2,777 through WLUX and $3,600 through LUSD; LUX
+// itself is $0.00061 against LUSD and $0.00012 against USDT, and both of those
+// claim to be a dollar. Pick a path and you have picked a number.
 //
 // So the assets that stand for an upstream one declare which one (see
-// `upstream` in lux-tokens.ts) and take its price from here. Everything else —
-// LUX, LZOO, and anything that only trades here — is priced by its pools,
-// which for those is the true and only answer.
+// `upstream` in lux-tokens.ts) and take its price from here — one answer,
+// independent of which pool a route happened to cross. Everything else — LUX,
+// LZOO, anything that only trades here — is priced by its pools, which for
+// those is the true and only answer.
 
 import { cacheGet, cacheSet, TTL } from './cache'
 

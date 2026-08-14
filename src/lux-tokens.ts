@@ -28,14 +28,14 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'LUX',
     name: 'Lux',
     decimals: 18,
-    logoUrl: 'https://lux.exchange/assets/lux_app_logo-4TeLXZ7D.svg',
+    logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png',
   },
   {
     address: '0x4888E4a2Ee0F03051c72D2BD3ACf755eD3498B3E',
     symbol: 'WLUX',
     name: 'Wrapped LUX',
     decimals: 18,
-    logoUrl: 'https://lux.exchange/assets/lux_app_logo-4TeLXZ7D.svg',
+    logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png',
   },
   {
     address: '0xF85CF66Fd0189C435033056edeC5e525F39374a6',
