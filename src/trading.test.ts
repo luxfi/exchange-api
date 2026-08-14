@@ -225,7 +225,7 @@ test('quote: an unroutable pair returns a clean 200 CLASSIC with an empty route,
   assert.equal(q.chainId, 96369)
 })
 
-test('LIVE quote CYRUS→WLUX: CLASSIC, permitData null, route is Array<Array>, decimals are strings, output > 0', async () => {
+test('LIVE quote CYRUS→LUX: CLASSIC, permitData null, route is Array<Array>, decimals are strings, output > 0', async () => {
   if (!(await reachable())) return
   const { res, captured } = mockRes()
   await handleQuote(
@@ -277,7 +277,7 @@ test('LIVE quote CYRUS→WLUX: CLASSIC, permitData null, route is Array<Array>, 
 
   // priceImpact within [0,100]; routeString reads SYM -> SYM -> SYM.
   assert.ok(q.priceImpact >= 0 && q.priceImpact <= 100)
-  assert.match(q.routeString, /CYRUS -> LUSD -> WLUX/)
+  assert.match(q.routeString, /CYRUS -> LUSD -> LUX/)
 
   // Boundary token echo: input is CYRUS, output is WLUX (caller passed WLUX, not native).
   assert.equal(q.input.token.toLowerCase(), CYRUS.toLowerCase())

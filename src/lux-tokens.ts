@@ -33,8 +33,15 @@ export const LUX_TOKENS: TokenMeta[] = [
   },
   {
     address: '0x4888E4a2Ee0F03051c72D2BD3ACf755eD3498B3E',
-    symbol: 'WLUX',
-    name: 'Wrapped LUX',
+    // The coin's own name, not the wrapper's.
+    //
+    // Wrapping is plumbing: the contract exists so a coin can be an ERC-20 in a
+    // pool, it is minted and burned one-for-one, and the exchange wraps and
+    // unwraps without being asked. It is the same asset — it already carries the
+    // same price and the same supply — so a second name for it is one more thing
+    // to explain and nothing to gain by explaining.
+    symbol: 'LUX',
+    name: 'Lux',
     decimals: 18,
     logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png',
     upstream: 'lux',
@@ -217,8 +224,15 @@ export const ZOO_TOKENS: TokenMeta[] = [
   },
   {
     address: '0x4888E4a2Ee0F03051c72D2BD3ACf755eD3498B3E',
-    symbol: 'WZOO',
-    name: 'Wrapped ZOO',
+    // The coin's own name, not the wrapper's.
+    //
+    // Wrapping is plumbing: the contract exists so a coin can be an ERC-20 in a
+    // pool, it is minted and burned one-for-one, and the exchange wraps and
+    // unwraps without being asked. It is the same asset — it already carries the
+    // same price and the same supply — so a second name for it is one more thing
+    // to explain and nothing to gain by explaining.
+    symbol: 'ZOO',
+    name: 'Zoo',
     decimals: 18,
     logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo.svg',
     upstream: 'zoo',
