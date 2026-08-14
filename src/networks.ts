@@ -199,3 +199,31 @@ const tokensByAddress = new Map<string, TokenMeta>(
 export function getTokenMeta(address: string): TokenMeta | undefined {
   return tokensByAddress.get(address.toLowerCase())
 }
+
+/**
+ * The same registry, for a chain this process is not serving.
+ *
+ * One process serves one network, which is what keeps `getTokenMeta` above
+ * unambiguous — but the exchange can be pointed at another chain's graph while
+ * running here, and that chain's tokens have to be named by ITS list. Merged
+ * into one map they cannot be: Lux and Zoo share addresses, so 0x4888e4a2 is the
+ * coin on both and whichever list answered last would name them both.
+ *
+ * The slug is the graph's own name for the chain, which is what arrives in the
+ * request path. `cchain` is Lux's, and the rest are the network keys.
+ */
+const SLUGS: Record<string, string> = { cchain: 'mainnet' }
+
+export function tokenMetaOn(slug: string, address: string): TokenMeta | undefined {
+  const net = NETWORKS[SLUGS[slug] ?? slug]
+  if (!net) {
+    return undefined
+  }
+  const want = address.toLowerCase()
+  return net.tokens.find((t) => t.address.toLowerCase() === want)
+}
+
+/** Where the graph for a slug lives, or undefined for a chain we do not know. */
+export function graphUrlFor(slug: string): string | undefined {
+  return NETWORKS[SLUGS[slug] ?? slug]?.subgraphUrl
+}

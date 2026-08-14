@@ -6,8 +6,9 @@ import { getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphSwaps, getSu
 import { filterRealMarkets, type RawMarket } from './dexMarkets'
 import { isDexQuery } from './dexRouting'
 import { queryDChain, fetchMarkets } from './dchain'
-import { ACTIVE, getTokenMeta } from './networks'
+import { ACTIVE, getTokenMeta, tokenMetaOn, graphUrlFor } from './networks'
 import { upstreamPrices, upstreamSupply } from './upstream'
+import type { TokenMeta } from './lux-tokens'
 
 // Real-asset gate for the AMM token/pool surfaces. The native graph indexes junk/test
 // tokens (e.g. fake USDC/USDT contracts) that are NOT real Lux assets; a token surfaces
@@ -233,6 +234,8 @@ type Dressing = {
   usd: Map<string, number>
   supply: Map<string, number>
   nativeUSD: number
+  /** What a token IS on the chain being read — not necessarily the one served. */
+  meta: (address: string) => TokenMeta | undefined
 }
 
 /** The transform: what the dressing does, given what it needs. */
@@ -248,7 +251,7 @@ export function dress(body: any, d: Dressing): any {
     if (!node || typeof node !== 'object') {
       return
     }
-    const meta = isToken(node) ? getTokenMeta(node.id) : undefined
+    const meta = isToken(node) ? d.meta(node.id) : undefined
     if (meta) {
       node.symbol = meta.symbol
       node.name = meta.name
@@ -268,7 +271,7 @@ export function dress(body: any, d: Dressing): any {
 }
 
 /** What the dressing needs, gathered. Every source of it is cached. */
-async function dressing(): Promise<Dressing> {
+async function dressing(slug?: string): Promise<Dressing> {
   const assets = [...new Set(ACTIVE.tokens.map((t) => t.upstream).filter((id): id is string => !!id))]
   const [usd, supplies, bundle] = await Promise.all([
     upstreamPrices(assets),
@@ -281,7 +284,55 @@ async function dressing(): Promise<Dressing> {
       supply.set(id, total)
     }
   }
-  return { usd, supply, nativeUSD: parseFloat(bundle?.ethPriceUSD ?? '') }
+  return {
+    usd,
+    supply,
+    nativeUSD: parseFloat(bundle?.ethPriceUSD ?? ''),
+    meta: slug ? (a: string) => tokenMetaOn(slug, a) : getTokenMeta,
+  }
+}
+
+/**
+ * A chain's own graph, read through here so its answers are dressed.
+ *
+ * The exchange can be pointed at another chain while running on this one, and
+ * only the graph has a route per chain — so the front end asked the graph
+ * directly and got the chain's own answers back undressed. Its token list named
+ * bridged ether LETH beside a token page calling the same contract ETH, and the
+ * page a person opens and the list they opened it from disagreed.
+ *
+ * The registry for the chain in the path, not the one this process serves: Lux
+ * and Zoo share contract addresses, so the served network's list would name
+ * another chain's tokens after its own.
+ */
+export async function handleChainGraph(req: Request, res: Response): Promise<void> {
+  const { slug, subgraph } = req.params
+  const url = graphUrlFor(slug)
+  if (!url) {
+    res.status(404).json({ errors: [{ message: `no graph for ${slug}` }] })
+    return
+  }
+  const target = url.replace('/amm/graphql', `/${subgraph}/graphql`)
+  const cacheKey = `chain:${target}:${JSON.stringify(req.body)}`
+  const cached = cacheGet(cacheKey)
+  if (cached) {
+    res.json(cached)
+    return
+  }
+  try {
+    const upstream = await fetch(target, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: req.body?.query, variables: req.body?.variables }),
+      signal: AbortSignal.timeout(15000),
+    })
+    const out = dress(await upstream.json(), await dressing(slug))
+    cacheSet(cacheKey, out, TTL.PROXY)
+    res.json(out)
+  } catch (e) {
+    console.error(`chain graph ${slug}/${subgraph} failed:`, e)
+    res.json({ data: null })
+  }
 }
 
 // tokenResponseFromUsd builds the Uniswap-schema Token from ALREADY-DERIVED USD

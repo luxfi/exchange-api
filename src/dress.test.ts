@@ -2,8 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 // The transform needs no network: what it needs is handed to it.
-const bare = { usd: new Map<string, number>(), supply: new Map<string, number>(), nativeUSD: 0 }
+const bare = { usd: new Map<string, number>(), supply: new Map<string, number>(), nativeUSD: 0, meta: getTokenMeta }
 import { dress } from './graphql'
+import { tokenMetaOn } from './networks'
+import { getTokenMeta } from './networks'
 
 // A token page issues a raw subgraph query, so what it reads has to be dressed
 // on the way out or it reads the chain's own answer while the list beside it
@@ -67,7 +69,7 @@ test('a response with no data is returned as-is', () => {
 // chain holds the slice bridged there. Valuing that slice as the whole asset is
 // how one token reported two fully diluted values an order of magnitude apart.
 test('a bridged row reports the asset supply, not its own slice', () => {
-  const zoo = { usd: new Map([['zoo', 0.0000129]]), supply: new Map([['zoo', 2e12]]), nativeUSD: 0.00044 }
+  const zoo = { usd: new Map([['zoo', 0.0000129]]), supply: new Map([['zoo', 2e12]]), nativeUSD: 0.00044, meta: getTokenMeta }
   const body = {
     data: {
       tokens: [
@@ -78,4 +80,26 @@ test('a bridged row reports the asset supply, not its own slice', () => {
   const out = dress(body, zoo)
   assert.equal(out.data.tokens[0].totalSupply, '2000000000000')
   assert.equal(Number(out.data.tokens[0].derivedETH).toFixed(6), (0.0000129 / 0.00044).toFixed(6))
+})
+
+// Lux and Zoo share contract addresses, so the chain being READ decides what a
+// token is called — not the chain this process happens to serve. Dressing
+// another chain's rows with the served network's list would name Zoo's coin
+// after Lux's.
+test('a chain is dressed by its own registry', () => {
+  const wrapper = '0x4888E4a2Ee0F03051c72D2BD3ACf755eD3498B3E'
+  const onZoo = tokenMetaOn('zoo', wrapper)
+  const onLux = tokenMetaOn('cchain', wrapper)
+  assert.ok(onZoo && onLux, 'both chains carry the wrapper')
+  assert.notEqual(onZoo!.symbol, onLux!.symbol, 'one address, two chains, two coins')
+
+  const body = { data: { tokens: [{ id: wrapper, symbol: 'WLUX', name: 'Wrapped LUX' }] } }
+  dress(body, { ...bare, meta: (a: string) => tokenMetaOn('zoo', a) })
+  assert.equal(body.data.tokens[0].symbol, onZoo!.symbol)
+})
+
+// A chain the registry does not carry has no graph to read, and saying so is
+// better than reading the served chain's and labelling it with someone else's.
+test('an unknown chain resolves to no registry', () => {
+  assert.equal(tokenMetaOn('nowhere', '0x4888E4a2Ee0F03051c72D2BD3ACf755eD3498B3E'), undefined)
 })

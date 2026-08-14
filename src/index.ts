@@ -1,5 +1,5 @@
 import express from 'express'
-import { handleGraphQL } from './graphql'
+import { handleGraphQL, handleChainGraph } from './graphql'
 import { handleSwappableTokens, handleQuote, handleSwap, handleCheckApproval } from './trading'
 import {
   handleTokenRankings,
@@ -29,6 +29,11 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }))
 
 // GraphQL endpoint — matches Uniswap's path
 app.post('/v1/graphql', handleGraphQL)
+
+// A chain's own graph, read through here so its answers are dressed by that
+// chain's registry. Only the graph has a route per chain, so this is where a
+// front end looking at another chain came to bypass everything above.
+app.post('/v1/graph/:slug/:subgraph/graphql', handleChainGraph)
 
 // Trading-api REST surface — on-chain quotes/swaps via dexRouter (QuoterV2 + SwapRouter02)
 app.get('/v1/swappable_tokens', handleSwappableTokens)
