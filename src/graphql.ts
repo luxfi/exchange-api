@@ -364,6 +364,25 @@ async function handleTopTokens(chain: string): Promise<any> {
 }
 
 // Handle token query for a specific address
+/**
+ * The chain coin's supply and what of it is loose, read from the wrapped
+ * native's indexer row — the only row that carries them.
+ */
+async function nativeSupply(): Promise<{ totalSupply?: number; circulating?: number }> {
+  const wrapped = ACTIVE.contracts.WLUX?.toLowerCase()
+  if (!wrapped) {
+    return {}
+  }
+  const row = (await getSubgraphTokens(100)).find((t) => String(t.id).toLowerCase() === wrapped)
+  const total = parseFloat(row?.totalSupply || '')
+  if (!Number.isFinite(total) || total <= 0) {
+    return {}
+  }
+  const staked = parseFloat(row?.staked || '')
+  const locked = Number.isFinite(staked) && staked > 0 ? Math.min(staked, total) : 0
+  return { totalSupply: total, circulating: total - locked }
+}
+
 async function handleToken(chain: string, address: string | null): Promise<any> {
   const [v3Bundle, v2Bundle, upstreamUsd] = await Promise.all([
     getV3Bundle(),
@@ -389,6 +408,14 @@ async function handleToken(chain: string, address: string | null): Promise<any> 
           logoUrl: ACTIVE.coin.logoUrl ?? undefined,
           ethPrice,
           upstreamUsd,
+          // The coin's supply, from the wrapped native's row.
+          //
+          // The indexer has no row at the zero sentinel — a native coin is not a
+          // contract — and publishes the chain's genesis supply and what is
+          // staked onto the wrapper instead. They are one asset, so the coin's
+          // page states the same valuation its wrapper does; without this it
+          // printed a dash while the wrapper beside it printed a figure.
+          ...(await nativeSupply()),
         }),
       },
     }
@@ -410,8 +437,13 @@ async function handleToken(chain: string, address: string | null): Promise<any> 
   return {
     data: {
       token: buildTokenResponse(address, chain, {
-        symbol: sg?.symbol || meta?.symbol || 'UNKNOWN',
-        name: sg?.name || meta?.name || 'Unknown Token',
+        // The curated name wins, as it already does for the ranked table. The
+        // chain says LETH / Lux Ether for bridged ether; the curated list says
+        // ETH / Ethereum, which is what it is called everywhere else and what
+        // the table prints. Reading the chain first here meant a token's own
+        // page and the table that links to it disagreed about its name.
+        symbol: meta?.symbol || sg?.symbol || 'UNKNOWN',
+        name: meta?.name || sg?.name || 'Unknown Token',
         decimals: sg ? parseInt(sg.decimals) : meta?.decimals || 18,
         derivedETH: sg?.derivedETH || '0',
         volumeUSD: sg?.tradeVolumeUSD || '0',
