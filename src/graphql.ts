@@ -187,7 +187,7 @@ async function proxyToNativeGraph(body: any): Promise<any> {
       body: JSON.stringify({ query: body?.query, variables: body?.variables }),
       signal: AbortSignal.timeout(15000),
     })
-    const raw = await res.json()
+    const raw = dress(await res.json(), await dressing())
     cacheSet(cacheKey, raw, TTL.PROXY)
     return raw
   } catch (e) {
@@ -196,6 +196,92 @@ async function proxyToNativeGraph(body: any): Promise<any> {
     // an empty market list rather than an error toast.
     return { data: null }
   }
+}
+
+/** A token row on the wire: an address for an id, and a symbol. */
+const isToken = (v: any): boolean =>
+  !!v && typeof v === 'object' && typeof v.id === 'string' && typeof v.symbol === 'string' &&
+  /^0x[0-9a-fA-F]{40}$/.test(v.id)
+
+/**
+ * What a token IS, applied wherever a token row leaves this service.
+ *
+ * Three things the chain cannot answer for itself, all of them already settled
+ * in the registry, all of them already asked by the named operations:
+ *
+ *   its name     Lux and Zoo were deployed from the same account in the same
+ *                order, so their contracts share addresses AND bytecode — and
+ *                bytecode carries the name string. Zoo's own coin introduced
+ *                itself as "Wrapped LUX" on Zoo's own exchange.
+ *
+ *   its supply   An asset we issue declares its supply once, on its home chain.
+ *                What sits in another chain's row is the slice bridged there,
+ *                and valuing that slice as the whole asset is how ZOO came to
+ *                report a fully diluted value of $221K on one chain and $19.7M
+ *                on the other.
+ *
+ *   its price    An asset the world prices is priced by the world. One thin
+ *                local pool, seeded at a round ratio and never traded, is not a
+ *                second opinion.
+ *
+ * The named handlers asked all three. A raw subgraph query went round them, and
+ * a token page issues one — so the page that a person actually opens read the
+ * chain's own answer while the list beside it read ours. One dressing, on the
+ * way out, for every path.
+ */
+type Dressing = {
+  usd: Map<string, number>
+  supply: Map<string, number>
+  nativeUSD: number
+}
+
+/** The transform: what the dressing does, given what it needs. */
+export function dress(body: any, d: Dressing): any {
+  if (!body?.data) {
+    return body
+  }
+  const walk = (node: any): void => {
+    if (Array.isArray(node)) {
+      node.forEach(walk)
+      return
+    }
+    if (!node || typeof node !== 'object') {
+      return
+    }
+    const meta = isToken(node) ? getTokenMeta(node.id) : undefined
+    if (meta) {
+      node.symbol = meta.symbol
+      node.name = meta.name
+      const supply = meta.upstream ? d.supply.get(meta.upstream) : undefined
+      if (supply && 'totalSupply' in node) {
+        node.totalSupply = String(supply)
+      }
+      const price = meta.upstream ? d.usd.get(meta.upstream) : undefined
+      if (price && d.nativeUSD > 0 && 'derivedETH' in node) {
+        node.derivedETH = String(price / d.nativeUSD)
+      }
+    }
+    Object.values(node).forEach(walk)
+  }
+  walk(body.data)
+  return body
+}
+
+/** What the dressing needs, gathered. Every source of it is cached. */
+async function dressing(): Promise<Dressing> {
+  const assets = [...new Set(ACTIVE.tokens.map((t) => t.upstream).filter((id): id is string => !!id))]
+  const [usd, supplies, bundle] = await Promise.all([
+    upstreamPrices(assets),
+    Promise.all(assets.map(async (id) => [id, (await upstreamSupply(id))?.totalSupply] as const)),
+    getV3Bundle(),
+  ])
+  const supply = new Map<string, number>()
+  for (const [id, total] of supplies) {
+    if (total !== undefined) {
+      supply.set(id, total)
+    }
+  }
+  return { usd, supply, nativeUSD: parseFloat(bundle?.ethPriceUSD ?? '') }
 }
 
 // tokenResponseFromUsd builds the Uniswap-schema Token from ALREADY-DERIVED USD

@@ -27,10 +27,15 @@ export function cacheSet(key: string, data: any, ttlSeconds: number): void {
   store.set(key, { data, expires: Date.now() + ttlSeconds * 1000 })
 }
 
-// Periodic cleanup
+// Drop what has expired, so a key nothing asks for again is not held forever.
+//
+// The sweep does not hold the process open: it is housekeeping for a program
+// that is running anyway, and nothing is waiting on it. Left counted, node keeps
+// the event loop alive for it — a server that will not exit on a signal, and a
+// test file that passes every assertion and then hangs until the runner kills it.
 setInterval(() => {
   const now = Date.now()
   for (const [key, entry] of store) {
     if (now > entry.expires) store.delete(key)
   }
-}, 60_000)
+}, 60_000).unref()
