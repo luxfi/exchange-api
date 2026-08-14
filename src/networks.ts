@@ -140,8 +140,11 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     // Lux's order book showing up on a Zoo site.
     dexDchainUrl: 'https://api.zoo.network/v1/bc/D',
     contracts: {
-      WLUX: ZERO,
-      LUSD: ZERO,
+      // Zoo's wrapped native and its dollar. These were the zero sentinel, so
+      // the coin's own page could not find the row its supply is published on
+      // and printed a dash where a valuation belongs.
+      WLUX: '0x4888E4a2Ee0F03051c72D2BD3ACf755eD3498B3E',
+      LUSD: '0x848Cff46eb323f323b6Bbe1Df274E40793d7f2c2',
       V3_QUOTER_V2: ZERO,
       V3_SWAP_ROUTER_02: ZERO,
       V3_FACTORY: ZERO,
