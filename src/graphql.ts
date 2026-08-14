@@ -212,15 +212,25 @@ function tokenResponseFromUsd(address: string, chain: string, v: {
   logoUrl?: string | null
 }): any {
   const id = `${chain}_${address}`
-  return {
+  const isNative = address === '0x0000000000000000000000000000000000000000'
+  const token = {
     __typename: 'Token',
     id,
-    address: address === '0x0000000000000000000000000000000000000000' ? null : address,
+    address: isNative ? null : address,
     chain,
     symbol: v.symbol,
     name: v.name,
     decimals: v.decimals,
     standard: 'ERC20',
+    // A token page asks for every one of these. A field the client selected and
+    // the server omitted is not a smaller answer — the client cannot write the
+    // object to its cache at all, so the whole token comes back undefined and
+    // the page reports it has no data. Present and honestly empty is a real
+    // answer; absent is a broken one.
+    isBridged: false,
+    bridgedWithdrawalInfo: null,
+    feeData: null,
+    protectionInfo: null,
     market: {
       __typename: 'TokenMarket',
       id: `${id}_market`,
@@ -229,14 +239,36 @@ function tokenResponseFromUsd(address: string, chain: string, v: {
       pricePercentChange: { __typename: 'Amount', id: `${id}_pct`, currency: 'USD', value: 0 },
       volume: { __typename: 'Amount', id: `${id}_vol`, value: v.volumeUSD, currency: 'USD' },
       priceHistory: [],
+      ohlc: [],
+      historicalVolume: [],
     },
     project: {
       __typename: 'TokenProject',
       id: `${id}_project`,
+      name: v.name,
       logoUrl: v.logoUrl || null,
       safetyLevel: 'VERIFIED',
+      isSpam: false,
+      spamCode: 0,
+      tokens: [] as any[],
     },
   }
+  // The project lists the tokens it covers, and here that is this one. A copy
+  // without the project underneath it, because the client walks this and a
+  // literal that contains itself does not survive being written down.
+  token.project.tokens = [
+    {
+      __typename: 'Token',
+      id,
+      chain,
+      address: isNative ? null : address,
+      decimals: v.decimals,
+      name: v.name,
+      symbol: v.symbol,
+      standard: 'ERC20',
+    },
+  ]
+  return token
 }
 
 // Build a Uniswap-schema Token response from raw subgraph-row data (derivedETH +
