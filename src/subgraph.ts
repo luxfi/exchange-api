@@ -106,6 +106,8 @@ export async function getSubgraphTokens(first: number = 100): Promise<any[]> {
       tradeVolumeUSD
       totalLiquidity
       txCount
+      totalSupply
+      staked
     }
   }`)
   return data?.tokens || []
@@ -165,6 +167,8 @@ export async function getSubgraphV3Tokens(first: number = 100): Promise<any[]> {
       volumeUSD
       totalValueLockedUSD
       txCount
+      totalSupply
+      staked
     }
   }`)
   return data?.tokens || []
@@ -248,6 +252,16 @@ export interface RankedToken {
   volumeUSD: number
   tvlUSD: number
   logoUrl: string | null
+  /**
+   * What the token is worth in whole, and what of it is loose.
+   *
+   * Both are whole tokens, not base units — the indexer scales them once so a
+   * consumer multiplies by a price directly. Undefined where the chain has not
+   * answered for the supply: a valuation of an unknown supply is a number with
+   * no meaning, and a dash is the honest way to say so.
+   */
+  totalSupply?: number
+  circulating?: number
 }
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
@@ -295,6 +309,28 @@ export function deriveUsd(opts: {
   let tvlUSD = parseFloat(opts.tvlUSD || '0')
   if (tvlUSD > OVERFLOW_CAP) tvlUSD = 0
   return { priceUSD, volumeUSD, tvlUSD }
+}
+
+/**
+ * A token's supply, and how much of it is loose.
+ *
+ * Both arrive from the indexer as whole tokens in an exact decimal string, so
+ * they are multiplied by a price directly. Circulating is the supply less what
+ * is staked — staked tokens exist and are not on the market, which is the whole
+ * difference between market capitalisation and fully diluted value.
+ *
+ * A supply the chain has not answered for yields neither number, so the page
+ * draws a dash. Valuing an unknown supply produces a figure with no meaning,
+ * and zero would claim a token worth nothing.
+ */
+function supplyOf(t: { totalSupply?: string; staked?: string }): { totalSupply?: number; circulating?: number } {
+  const total = parseFloat(t.totalSupply || '')
+  if (!Number.isFinite(total) || total <= 0) {
+    return {}
+  }
+  const staked = parseFloat(t.staked || '')
+  const locked = Number.isFinite(staked) && staked > 0 ? Math.min(staked, total) : 0
+  return { totalSupply: total, circulating: total - locked }
 }
 
 export async function getRankedTokens(): Promise<RankedToken[]> {
@@ -364,6 +400,7 @@ export async function getRankedTokens(): Promise<RankedToken[]> {
         name: meta?.name || t.name || 'Unknown Token',
         decimals: meta?.decimals ?? parseInt(t.decimals, 10),
         ...usd,
+        ...supplyOf(t),
         logoUrl: meta?.logoUrl ?? null,
       }
     })

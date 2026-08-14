@@ -42,7 +42,7 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'USDC',
     name: 'Bridged USDC',
     decimals: 6,
-    logoUrl: 'https://assets.coingecko.com/coins/images/6319/small/usdc.png',
+    logoUrl: 'https://coin-images.coingecko.com/coins/images/6319/large/USDC.png?1769615602',
     upstream: 'usd-coin',
   },
   {
@@ -50,7 +50,7 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'ETH',
     name: 'Ethereum',
     decimals: 18,
-    logoUrl: 'https://assets.coingecko.com/coins/images/279/small/ethereum.png',
+    logoUrl: 'https://coin-images.coingecko.com/coins/images/279/large/ethereum.png?1696501628',
     upstream: 'ethereum',
   },
   {
@@ -58,7 +58,7 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'BTC',
     name: 'Bitcoin',
     decimals: 8,
-    logoUrl: 'https://assets.coingecko.com/coins/images/1/small/bitcoin.png',
+    logoUrl: 'https://coin-images.coingecko.com/coins/images/1/large/bitcoin.png?1696501400',
     upstream: 'bitcoin',
   },
   {
@@ -66,7 +66,7 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'SOL',
     name: 'Solana',
     decimals: 18,
-    logoUrl: 'https://assets.coingecko.com/coins/images/4128/small/solana.png',
+    logoUrl: 'https://coin-images.coingecko.com/coins/images/4128/large/solana.png?1718769756',
     upstream: 'solana',
   },
   {
@@ -74,21 +74,21 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'LUSD',
     name: 'Lux Dollar',
     decimals: 18,
-    logoUrl: null,
+    logoUrl: 'https://cdn.lux.network/exchange/icon-png/lusd.png',
   },
   {
     address: '0x5E5290f350352768bD2bfC59c2DA15DD04A7cB88',
     symbol: 'LZOO',
     name: 'Lux ZOO',
     decimals: 18,
-    logoUrl: null,
+    logoUrl: 'https://cdn.lux.network/exchange/icon-png/lzoo.png',
   },
   {
     address: '0x0e4bD0DD67c15dECfBBBdbbE07FC9d51D737693D',
     symbol: 'AVAX',
     name: 'Avalanche',
     decimals: 18,
-    logoUrl: 'https://assets.coingecko.com/coins/images/12559/small/Avalanche_Circle_RedWhite_Trans.png',
+    logoUrl: 'https://coin-images.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite_Trans.png?1696512369',
     upstream: 'avalanche-2',
   },
   {
@@ -96,7 +96,7 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'BLAST',
     name: 'Blast',
     decimals: 18,
-    logoUrl: null,
+    logoUrl: 'https://cdn.lux.network/bridge/currencies/blast.svg',
     upstream: 'blast',
   },
   {
@@ -104,7 +104,7 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'BNB',
     name: 'BNB',
     decimals: 18,
-    logoUrl: 'https://assets.coingecko.com/coins/images/825/small/bnb-icon2_2x.png',
+    logoUrl: 'https://coin-images.coingecko.com/coins/images/825/large/bnb-icon2_2x.png?1696501970',
     upstream: 'binancecoin',
   },
   {
@@ -112,7 +112,7 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'BOME',
     name: 'Book of Meme',
     decimals: 18,
-    logoUrl: null,
+    logoUrl: 'https://coin-images.coingecko.com/coins/images/36071/large/bome.png?1710407255',
     upstream: 'book-of-meme',
   },
   {
@@ -120,7 +120,7 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'BONK',
     name: 'Bonk',
     decimals: 18,
-    logoUrl: null,
+    logoUrl: 'https://coin-images.coingecko.com/coins/images/28600/large/bonk.jpg?1696527587',
     upstream: 'bonk',
   },
   {
@@ -128,7 +128,7 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'CELO',
     name: 'Celo',
     decimals: 18,
-    logoUrl: null,
+    logoUrl: 'https://cdn.lux.network/bridge/currencies/celo.svg',
     upstream: 'celo',
   },
   {
@@ -136,7 +136,7 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'DOGS',
     name: 'Dogs',
     decimals: 18,
-    logoUrl: null,
+    logoUrl: 'https://cdn.lux.network/bridge/currencies/dogs.svg',
     upstream: 'dogs-2',
   },
   {
@@ -144,7 +144,7 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'POL',
     name: 'Polygon',
     decimals: 18,
-    logoUrl: 'https://assets.coingecko.com/coins/images/4713/small/polygon.png',
+    logoUrl: 'https://coin-images.coingecko.com/coins/images/32440/large/pol.png?1759114181',
     upstream: 'polygon-ecosystem-token',
   },
   {
@@ -152,7 +152,7 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'TON',
     name: 'Toncoin',
     decimals: 9,
-    logoUrl: 'https://assets.coingecko.com/coins/images/17980/small/ton_symbol.png',
+    logoUrl: 'https://coin-images.coingecko.com/coins/images/17980/large/Gram_Circular_Badge.png?1781524778',
     upstream: 'the-open-network',
   },
   {
@@ -167,7 +167,7 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'MELANIA',
     name: 'Melania Meme',
     decimals: 18,
-    logoUrl: null,
+    logoUrl: 'https://coin-images.coingecko.com/coins/images/53775/large/melania-meme.png?1737329885',
     upstream: 'melania-meme',
   },
   {
@@ -175,7 +175,7 @@ export const LUX_TOKENS: TokenMeta[] = [
     symbol: 'TRUMP',
     name: 'OFFICIAL TRUMP',
     decimals: 18,
-    logoUrl: null,
+    logoUrl: 'https://coin-images.coingecko.com/coins/images/53746/large/trump.png?1737171561',
     upstream: 'official-trump',
   },
   {
@@ -193,7 +193,7 @@ export const ZOO_TOKENS: TokenMeta[] = [
     symbol: 'ZOO',
     name: 'Zoo',
     decimals: 18,
-    logoUrl: null,
+    logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo.svg',
   },
 ]
 

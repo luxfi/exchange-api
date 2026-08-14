@@ -202,6 +202,19 @@ async function proxyToNativeGraph(body: any): Promise<any> {
 // values. This is the single shaper; buildTokenResponse (subgraph-row inputs) and
 // handleTopTokens (RankedToken inputs) both funnel through here so the output
 // shape lives once.
+/** price x quantity, or undefined when the quantity is unknown. */
+function mul(price: number, qty?: number): number | undefined {
+  if (qty === undefined || !Number.isFinite(qty) || !Number.isFinite(price)) {
+    return undefined
+  }
+  return price * qty
+}
+
+/** A USD Amount, or null — the shape the client reads as "no figure". */
+function usdAmount(id: string, value?: number): any {
+  return value === undefined ? null : { __typename: 'Amount', id, value, currency: 'USD' }
+}
+
 function tokenResponseFromUsd(address: string, chain: string, v: {
   symbol: string
   name: string
@@ -210,6 +223,8 @@ function tokenResponseFromUsd(address: string, chain: string, v: {
   volumeUSD: number
   tvlUSD: number
   logoUrl?: string | null
+  totalSupply?: number
+  circulating?: number
 }): any {
   const id = `${chain}_${address}`
   const isNative = address === '0x0000000000000000000000000000000000000000'
@@ -238,6 +253,16 @@ function tokenResponseFromUsd(address: string, chain: string, v: {
       price: { __typename: 'Amount', id: `${id}_price`, value: v.priceUSD, currency: 'USD' },
       pricePercentChange: { __typename: 'Amount', id: `${id}_pct`, currency: 'USD', value: 0 },
       volume: { __typename: 'Amount', id: `${id}_vol`, value: v.volumeUSD, currency: 'USD' },
+      // What the token is worth in whole, and what of it is on the market.
+      // Both were absent, so the page drew a dash where a valuation belongs
+      // however much the token traded — the supply was on the indexer's row the
+      // whole time and nothing carried it this far.
+      //
+      // Null where the supply is unknown, which the client renders as the dash
+      // it already had. A valuation of an unknown supply is a figure with no
+      // meaning; zero would say the token is worth nothing.
+      fullyDilutedValuation: usdAmount(`${id}_fdv`, mul(v.priceUSD, v.totalSupply)),
+      marketCap: usdAmount(`${id}_mcap`, mul(v.priceUSD, v.circulating)),
       priceHistory: [],
       ohlc: [],
       historicalVolume: [],
@@ -283,6 +308,8 @@ function buildTokenResponse(address: string, chain: string, opts: {
   logoUrl?: string | null
   ethPrice?: number
   upstreamUsd?: Map<string, number>
+  totalSupply?: number
+  circulating?: number
 } = {}): any {
   // One definition of what a token is worth, shared with the ranked list, so a
   // token's price on its own page and its price in the table are the same
@@ -305,6 +332,8 @@ function buildTokenResponse(address: string, chain: string, opts: {
     priceUSD,
     volumeUSD,
     tvlUSD,
+    totalSupply: opts.totalSupply,
+    circulating: opts.circulating,
     logoUrl: opts.logoUrl,
   })
 }
@@ -326,6 +355,8 @@ async function handleTopTokens(chain: string): Promise<any> {
       priceUSD: t.priceUSD,
       volumeUSD: t.volumeUSD,
       tvlUSD: t.tvlUSD,
+      totalSupply: t.totalSupply,
+      circulating: t.circulating,
       logoUrl: t.logoUrl,
     }),
   )
@@ -366,6 +397,15 @@ async function handleToken(chain: string, address: string | null): Promise<any> 
   const meta = getTokenMeta(address)
   const subgraphTokens = await getSubgraphTokens(100)
   const sg = subgraphTokens.find(t => t.id.toLowerCase() === address.toLowerCase())
+  // The supply is on the same indexer row as the price. Read here so a token's
+  // own page states the same valuation the ranked table does.
+  const total = parseFloat(sg?.totalSupply || '')
+  const staked = parseFloat(sg?.staked || '')
+  const totalSupply = Number.isFinite(total) && total > 0 ? total : undefined
+  const circulating =
+    totalSupply === undefined
+      ? undefined
+      : totalSupply - (Number.isFinite(staked) && staked > 0 ? Math.min(staked, totalSupply) : 0)
 
   return {
     data: {
@@ -379,6 +419,8 @@ async function handleToken(chain: string, address: string | null): Promise<any> 
         logoUrl: meta?.logoUrl || null,
         ethPrice,
         upstreamUsd,
+        totalSupply,
+        circulating,
       }),
     },
   }

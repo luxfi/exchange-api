@@ -65,7 +65,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
   mainnet: {
     name: 'mainnet',
     chainId: 96369,
-    coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://lux.exchange/assets/lux_app_logo-4TeLXZ7D.svg' },
+    coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png' },
     tokens: LUX_TOKENS,
     rpcUrl: 'https://api.lux.network/v1/bc/C/rpc',
     subgraphUrl: 'http://explorer.lux-mainnet.svc:8090/v1/graph/cchain/amm/graphql',
@@ -82,7 +82,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
   testnet: {
     name: 'testnet',
     chainId: 96368,
-    coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://lux.exchange/assets/lux_app_logo-4TeLXZ7D.svg' },
+    coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png' },
     tokens: LUX_TOKENS,
     rpcUrl: 'https://api.lux-test.network/v1/bc/C/rpc',
     subgraphUrl: 'http://explorer.lux-testnet.svc:8090/v1/graph/cchain/amm/graphql',
@@ -102,7 +102,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
   devnet: {
     name: 'devnet',
     chainId: 96367,
-    coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://lux.exchange/assets/lux_app_logo-4TeLXZ7D.svg' },
+    coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png' },
     tokens: LUX_TOKENS,
     rpcUrl: 'https://api.lux-dev.network/v1/bc/C/rpc',
     subgraphUrl: 'http://explorer.lux-devnet.svc:8090/v1/graph/cchain/amm/graphql',
@@ -128,7 +128,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
   zoo: {
     name: 'zoo',
     chainId: 200200,
-    coin: { symbol: 'ZOO', name: 'Zoo', logoUrl: 'https://zoo.exchange/logo.svg' },
+    coin: { symbol: 'ZOO', name: 'Zoo', logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo.svg' },
     tokens: ZOO_TOKENS,
     // Zoo's node runs in zoo-k8s, so there is no in-cluster name for it from
     // lux-k8s and the raw :9630 LB is firewalled to non-DigitalOcean sources.
@@ -151,7 +151,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
   localnet: {
     name: 'localnet',
     chainId: 31337,
-    coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://lux.exchange/assets/lux_app_logo-4TeLXZ7D.svg' },
+    coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png' },
     tokens: LUX_TOKENS,
     rpcUrl: 'http://127.0.0.1:9650/v1/bc/C/rpc',
     subgraphUrl: 'http://127.0.0.1:8090/v1/graph/cchain/amm/graphql',
