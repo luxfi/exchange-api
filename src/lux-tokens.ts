@@ -29,6 +29,7 @@ export const LUX_TOKENS: TokenMeta[] = [
     name: 'Lux',
     decimals: 18,
     logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png',
+    upstream: 'lux',
   },
   {
     address: '0x4888E4a2Ee0F03051c72D2BD3ACf755eD3498B3E',
@@ -36,6 +37,7 @@ export const LUX_TOKENS: TokenMeta[] = [
     name: 'Wrapped LUX',
     decimals: 18,
     logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png',
+    upstream: 'lux',
   },
   {
     address: '0xF85CF66Fd0189C435033056edeC5e525F39374a6',
@@ -206,6 +208,7 @@ export const ZOO_TOKENS: TokenMeta[] = [
     name: 'Zoo',
     decimals: 18,
     logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo.svg',
+    upstream: 'zoo',
   },
   {
     address: '0x4888E4a2Ee0F03051c72D2BD3ACf755eD3498B3E',
@@ -213,6 +216,7 @@ export const ZOO_TOKENS: TokenMeta[] = [
     name: 'Wrapped ZOO',
     decimals: 18,
     logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo.svg',
+    upstream: 'zoo',
   },
   {
     address: '0x5E5290f350352768bD2bfC59c2DA15DD04A7cB88',
@@ -220,6 +224,7 @@ export const ZOO_TOKENS: TokenMeta[] = [
     name: 'Zoo LUX',
     decimals: 18,
     logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png',
+    upstream: 'lux',
   },
   {
     address: '0x848Cff46eb323f323b6Bbe1Df274E40793d7f2c2',
