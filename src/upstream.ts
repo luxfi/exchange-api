@@ -50,17 +50,38 @@ const ASSETS: Record<string, { home: string }> = {
   zoo: { home: 'zoo' },
 }
 
-/** Every place we price this asset: the tokens across our chains that claim it. */
+/**
+ * Every CHAIN that prices this asset — one vote each.
+ *
+ * A chain, not a token. Its coin and that coin's wrapper are the same asset at
+ * the same price in the same pools, so listing both gave the home chain two
+ * votes: ZOO weighed Zoo at $277,290 + $138,438 against Lux's $58,451, when the
+ * second figure is the wrapper's share of the first.
+ *
+ * The wrapper is the entity that carries the price and the liquidity — a coin
+ * has no pool of its own, it trades wrapped — so that row is the chain's vote
+ * and the coin rides on it.
+ */
 function venues(asset: string): Array<{ network: string; address: string }> {
-  const out: Array<{ network: string; address: string }> = []
+  const byNetwork = new Map<string, string>()
   for (const [network, cfg] of Object.entries(NETWORKS)) {
     for (const t of cfg.tokens) {
-      if (t.upstream === asset) {
-        out.push({ network, address: t.address.toLowerCase() })
+      if (t.upstream !== asset) {
+        continue
       }
+      const address = t.address.toLowerCase()
+      // The coin defers to its wrapper; anything else is that chain's own row.
+      if (address === ZERO) {
+        const wrapped = cfg.contracts.WLUX?.toLowerCase()
+        if (wrapped && wrapped !== ZERO && !byNetwork.has(network)) {
+          byNetwork.set(network, wrapped)
+        }
+        continue
+      }
+      byNetwork.set(network, address)
     }
   }
-  return out
+  return [...byNetwork].map(([network, address]) => ({ network, address }))
 }
 
 /** An asset we price ourselves is one we issue. */
@@ -124,12 +145,16 @@ async function worldPrices(ids: string[]): Promise<Map<string, number>> {
   }
 }
 
-/** One venue's opinion: what it says the asset is worth, and how much backs it. */
+/**
+ * One chain's opinion: what it says the asset is worth, and how much of THAT
+ * ASSET's liquidity stands behind the answer.
+ *
+ * The weight is the asset's own value locked, not the chain's. Weighing a coin
+ * by its factory total counted every unrelated pool on that chain as evidence
+ * about this one token.
+ */
 async function quote(v: { network: string; address: string }): Promise<{ usd: number; weight: number } | undefined> {
-  const isCoin = v.address === ZERO
-  const query = isCoin
-    ? `{ bundle(id: "1") { ethPriceUSD } factories(first: 1) { totalValueLockedUSD } }`
-    : `{ bundle(id: "1") { ethPriceUSD } tokens(first: 1, where: { id: "${v.address}" }) { derivedETH totalValueLockedUSD } }`
+  const query = `{ bundle(id: "1") { ethPriceUSD } tokens(first: 1, where: { id: "${v.address}" }) { derivedETH totalValueLockedUSD } }`
   try {
     const res = await fetch(NETWORKS[v.network].subgraphUrl, {
       method: 'POST',
@@ -142,13 +167,11 @@ async function quote(v: { network: string; address: string }): Promise<{ usd: nu
     if (!Number.isFinite(coin) || coin <= 0) {
       return undefined
     }
-    const usd = isCoin ? coin : parseFloat(data?.tokens?.[0]?.derivedETH ?? '') * coin
+    const usd = parseFloat(data?.tokens?.[0]?.derivedETH ?? '') * coin
     if (!Number.isFinite(usd) || usd <= 0) {
       return undefined
     }
-    const held = parseFloat(
-      (isCoin ? data?.factories?.[0]?.totalValueLockedUSD : data?.tokens?.[0]?.totalValueLockedUSD) ?? '',
-    )
+    const held = parseFloat(data?.tokens?.[0]?.totalValueLockedUSD ?? '')
     // A venue with no value locked still has an opinion, just the quietest one.
     return { usd, weight: Number.isFinite(held) && held > 0 ? held : 1 }
   } catch (e) {
