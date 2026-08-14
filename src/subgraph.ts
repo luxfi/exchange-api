@@ -2,6 +2,7 @@ import fetch from 'node-fetch'
 import { cacheGet, cacheSet, TTL } from './cache'
 import { getTokenMeta } from './lux-tokens'
 import { ACTIVE } from './networks'
+import { upstreamPrices } from './upstream'
 
 // Data source is the NATIVE Lux graph engine (luxfi/graph) embedded in the
 // explorer — NOT a hosted The-Graph node and NOT Uniswap's gateway. This module
@@ -261,15 +262,33 @@ export function capUsd(v: string | number | undefined | null): number {
   return n
 }
 
-function deriveUsd(opts: {
+/**
+ * What one token is worth, and where that number comes from.
+ *
+ * Three sources, in the order they are trusted:
+ *
+ *   an upstream asset — ETH, BTC, a dollar — priced by the world, because a
+ *   pool here is not a second opinion on ether;
+ *   a dollar this chain issues, which is a peg we assert rather than observe;
+ *   otherwise the pools, which for a token that only trades here are the true
+ *   and only answer.
+ *
+ * `upstreamUsd` carries the first, resolved once per batch by the caller.
+ */
+export function deriveUsd(opts: {
   symbol: string
+  address?: string
   derivedETH?: string
   volumeUSD?: string
   tvlUSD?: string
   ethPrice: number
+  upstreamUsd?: Map<string, number>
 }): { priceUSD: number; volumeUSD: number; tvlUSD: number } {
   const derivedETH = parseFloat(opts.derivedETH || '0')
-  let priceUSD = STABLECOINS.has(opts.symbol.toUpperCase()) ? 1.0 : derivedETH * opts.ethPrice
+  const upstream = opts.address ? getTokenMeta(opts.address)?.upstream : undefined
+  const quoted = upstream ? opts.upstreamUsd?.get(upstream) : undefined
+
+  let priceUSD = quoted ?? (STABLECOINS.has(opts.symbol.toUpperCase()) ? 1.0 : derivedETH * opts.ethPrice)
   if (priceUSD > OVERFLOW_CAP) priceUSD = 0
   let volumeUSD = parseFloat(opts.volumeUSD || '0')
   if (volumeUSD > OVERFLOW_CAP) volumeUSD = 0
@@ -290,11 +309,14 @@ export async function getRankedTokens(): Promise<RankedToken[]> {
       ? parseFloat(v2Bundle.ethPrice)
       : 0
 
-  const [v2Tokens, v3Tokens, v2Pairs, v3Pools] = await Promise.all([
+  const [v2Tokens, v3Tokens, v2Pairs, v3Pools, upstreamUsd] = await Promise.all([
     getSubgraphTokens(100),
     getSubgraphV3Tokens(100),
     getSubgraphPairs(200),
     getSubgraphV3Pools(200),
+    // One request covers every asset with an upstream, so the whole ranked
+    // list is priced from one snapshot and no two rows disagree about ether.
+    upstreamPrices(ACTIVE.tokens.map((t) => t.upstream).filter((id): id is string => !!id)),
   ])
 
   // Swappable iff token is token0/token1 of a real pair/pool. Excludes the LP/pair
@@ -335,7 +357,7 @@ export async function getRankedTokens(): Promise<RankedToken[]> {
       const symbol = meta?.symbol || t.symbol || 'UNKNOWN'
       const volume = t.source === 'v3' ? t.volumeUSD : t.tradeVolumeUSD
       const tvl = t.source === 'v3' ? t.totalValueLockedUSD : t.totalLiquidity
-      const usd = deriveUsd({ symbol, derivedETH: t.derivedETH, volumeUSD: volume, tvlUSD: tvl, ethPrice })
+      const usd = deriveUsd({ symbol, address: t.id, derivedETH: t.derivedETH, volumeUSD: volume, tvlUSD: tvl, ethPrice, upstreamUsd })
       return {
         address: String(t.id).toLowerCase(),
         symbol,

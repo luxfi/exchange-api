@@ -1,12 +1,13 @@
 import { Request, Response } from 'express'
 import fetch from 'node-fetch'
 import { cacheGet, cacheSet, TTL } from './cache'
-import { getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphSwaps, getSubgraphV3Pools, getV3Bundle, getSubgraphV3Swaps, getRankedTokens } from './subgraph'
+import { getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphSwaps, getSubgraphV3Pools, getV3Bundle, getSubgraphV3Swaps, getRankedTokens, deriveUsd } from './subgraph'
 import { getTokenMeta } from './lux-tokens'
 import { filterRealMarkets, type RawMarket } from './dexMarkets'
 import { isDexQuery } from './dexRouting'
 import { queryDChain, fetchMarkets } from './dchain'
 import { ACTIVE } from './networks'
+import { upstreamPrices } from './upstream'
 
 // Real-asset gate for the AMM token/pool surfaces. The native graph indexes junk/test
 // tokens (e.g. fake USDC/USDT contracts) that are NOT real Lux assets; a token surfaces
@@ -249,22 +250,21 @@ function buildTokenResponse(address: string, chain: string, opts: {
   totalLiquidity?: string
   logoUrl?: string | null
   ethPrice?: number
+  upstreamUsd?: Map<string, number>
 } = {}): any {
-  const ethPrice = opts.ethPrice || 0
-  const derivedETH = parseFloat(opts.derivedETH || '0')
-
-  // Force stablecoins to $1 (subgraph prices them through wrong pool paths)
-  const sym = (opts.symbol || '').toUpperCase()
-  const isStablecoin = ['USDT', 'USDC', 'LUSD', 'DAI', 'BUSD'].includes(sym)
-  let priceUSD = isStablecoin ? 1.0 : derivedETH * ethPrice
-  // Cap insane prices (decimal overflow artifacts from small pools)
-  if (priceUSD > 1e12) priceUSD = 0
-  let volumeUSD = parseFloat(opts.volumeUSD || '0')
-  // Cap insane volumes (subgraph decimal overflow artifacts)
-  if (volumeUSD > 1e12) volumeUSD = 0
-  // totalLiquidity from subgraph is already in USD (totalValueLockedUSD)
-  let tvlUSD = parseFloat(opts.totalLiquidity || '0')
-  if (tvlUSD > 1e12) tvlUSD = 0
+  // One definition of what a token is worth, shared with the ranked list, so a
+  // token's price on its own page and its price in the table are the same
+  // number arrived at the same way. This block used to restate the arithmetic
+  // and the stablecoin exception in its own words.
+  const { priceUSD, volumeUSD, tvlUSD } = deriveUsd({
+    symbol: opts.symbol || '',
+    address,
+    derivedETH: opts.derivedETH,
+    volumeUSD: opts.volumeUSD,
+    tvlUSD: opts.totalLiquidity,
+    ethPrice: opts.ethPrice || 0,
+    upstreamUsd: opts.upstreamUsd,
+  })
 
   return tokenResponseFromUsd(address, chain, {
     symbol: opts.symbol || 'UNKNOWN',
@@ -302,7 +302,11 @@ async function handleTopTokens(chain: string): Promise<any> {
 
 // Handle token query for a specific address
 async function handleToken(chain: string, address: string | null): Promise<any> {
-  const [v3Bundle, v2Bundle] = await Promise.all([getV3Bundle(), getBundle()])
+  const [v3Bundle, v2Bundle, upstreamUsd] = await Promise.all([
+    getV3Bundle(),
+    getBundle(),
+    upstreamPrices(ACTIVE.tokens.map((t) => t.upstream).filter((id): id is string => !!id)),
+  ])
   const ethPrice = v3Bundle ? parseFloat(v3Bundle.ethPriceUSD) : (v2Bundle ? parseFloat(v2Bundle.ethPrice) : 0)
 
   // Native token
@@ -321,6 +325,7 @@ async function handleToken(chain: string, address: string | null): Promise<any> 
           derivedETH: '1',
           logoUrl: ACTIVE.coin.logoUrl ?? undefined,
           ethPrice,
+          upstreamUsd,
         }),
       },
     }
@@ -341,6 +346,7 @@ async function handleToken(chain: string, address: string | null): Promise<any> 
         totalLiquidity: sg?.totalLiquidity || '0',
         logoUrl: meta?.logoUrl || null,
         ethPrice,
+        upstreamUsd,
       }),
     },
   }
