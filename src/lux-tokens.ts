@@ -187,6 +187,18 @@ export const LUX_TOKENS: TokenMeta[] = [
   },
 ]
 
+// Zoo mainnet (200200). Every address and every decimals here was read off the
+// chain, and so were the symbols — except the wrapper's.
+//
+// Lux and Zoo were deployed from the same account in the same order, so their
+// contracts share addresses AND bytecode, and bytecode carries the name string:
+// the wrapped native at 0x4888e4a2 answers symbol() with "WLUX" and name() with
+// "Wrapped LUX" on the ZOO chain. Zoo's exchange was printing Lux's name for
+// Zoo's own coin. The chain is wrong about this one and the list is right.
+//
+// Zoo had ONE entry here — its native coin — and the curated list is the gate
+// every token surface passes through, so nothing else on the chain could reach
+// the exchange at all.
 export const ZOO_TOKENS: TokenMeta[] = [
   {
     address: '0x0000000000000000000000000000000000000000',
@@ -194,6 +206,96 @@ export const ZOO_TOKENS: TokenMeta[] = [
     name: 'Zoo',
     decimals: 18,
     logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo.svg',
+  },
+  {
+    address: '0x4888E4a2Ee0F03051c72D2BD3ACf755eD3498B3E',
+    symbol: 'WZOO',
+    name: 'Wrapped ZOO',
+    decimals: 18,
+    logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo.svg',
+  },
+  {
+    address: '0x5E5290f350352768bD2bfC59c2DA15DD04A7cB88',
+    symbol: 'ZLUX',
+    name: 'Zoo LUX',
+    decimals: 18,
+    logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png',
+  },
+  {
+    address: '0x848Cff46eb323f323b6Bbe1Df274E40793d7f2c2',
+    symbol: 'ZUSD',
+    name: 'Zoo Dollar',
+    decimals: 18,
+    logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo/zusd.svg',
+  },
+  {
+    address: '0x1E48D32a4F5e9f08DB9aE4959163300FaF8A6C8e',
+    symbol: 'ZBTC',
+    name: 'Zoo BTC',
+    decimals: 18,
+    logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo/zbtc.svg',
+    upstream: 'bitcoin',
+  },
+  {
+    address: '0x60E0a8167FC13dE89348978860466C9ceC24B9ba',
+    symbol: 'ZETH',
+    name: 'Zoo ETH',
+    decimals: 18,
+    logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo/zeth.svg',
+    upstream: 'ethereum',
+  },
+  {
+    address: '0x8031e9B0d02a792cfEfaa2BdCA6E1289D385426F',
+    symbol: 'USDC',
+    name: 'USD Coin',
+    decimals: 18,
+    logoUrl: 'https://coin-images.coingecko.com/coins/images/6319/large/USDC.png?1769615602',
+    upstream: 'usd-coin',
+  },
+  {
+    address: '0xdf1De693c31E2A5eb869c329529623556b20AbF3',
+    symbol: 'USDT',
+    name: 'Tether',
+    decimals: 18,
+    logoUrl: 'https://coin-images.coingecko.com/coins/images/325/large/Tether.png?1696501661',
+    upstream: 'tether',
+  },
+  {
+    address: '0x768972Ee4038a23b20B3beD3848027460172D897',
+    symbol: 'TRUMP',
+    name: 'OFFICIAL TRUMP',
+    decimals: 6,
+    logoUrl: 'https://coin-images.coingecko.com/coins/images/53746/large/trump.png?1737171561',
+    upstream: 'official-trump',
+  },
+  {
+    address: '0x14F48A55722ecBa725aA83a294a8d3E8bE47DE46',
+    symbol: 'MELANIA',
+    name: 'Melania Meme',
+    decimals: 6,
+    logoUrl: 'https://coin-images.coingecko.com/coins/images/53775/large/melania-meme.png?1737329885',
+    upstream: 'melania-meme',
+  },
+  {
+    address: '0xed15C23b27a69b5bd50b1EeF5b8F1c8D849462b7',
+    symbol: 'SLOG',
+    name: 'Slog',
+    decimals: 6,
+    logoUrl: null,
+  },
+  {
+    address: '0x0A78f7Ce8D65e0FD4D6B78848483bA3C4fb895c5',
+    symbol: 'CYRUS',
+    name: 'Cyrus AI',
+    decimals: 6,
+    logoUrl: null,
+  },
+  {
+    address: '0xA69E6612B525474CB893500b70FD7Ec374CbF9a3',
+    symbol: 'Z',
+    name: 'Z',
+    decimals: 6,
+    logoUrl: null,
   },
 ]
 
@@ -203,11 +305,12 @@ export const ZOO_TOKENS: TokenMeta[] = [
 // resolve native LUX. The trading API is C-Chain-only, where native == LUX.
 export const LUX_NATIVE: TokenMeta = LUX_TOKENS[0]
 
-const tokensByAddress = new Map<string, TokenMeta>()
-for (const t of [...LUX_TOKENS, ...ZOO_TOKENS]) {
-  tokensByAddress.set(t.address.toLowerCase(), t)
-}
-
-export function getTokenMeta(address: string): TokenMeta | undefined {
-  return tokensByAddress.get(address.toLowerCase())
-}
+// One process serves one network, so a lookup answers from THAT network's
+// registry.
+//
+// Merging every chain's tokens into one map by address cannot work here: Lux and
+// Zoo were deployed from the same account in the same order, so they share
+// addresses AND bytecode. 0x848cff46 is LUSD on Lux and ZUSD on Zoo; 0x4888e4a2
+// is WLUX on one and WZOO on the other. Whichever list was merged last won, for
+// both chains — a quote on Lux came back routed "CYRUS -> ZUSD -> WZOO".
+// The lookup lives in networks.ts, beside the registry it reads.

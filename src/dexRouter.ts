@@ -20,8 +20,8 @@ import {
   type Address,
   type PublicClient,
 } from 'viem'
-import { getTokenMeta } from './lux-tokens'
-import { ACTIVE } from './networks'
+
+import { ACTIVE, getTokenMeta } from './networks'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chain + contract constants (canonical registry values for chainId 96369; see

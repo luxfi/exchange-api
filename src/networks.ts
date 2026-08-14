@@ -180,3 +180,19 @@ function resolveActive(): NetworkConfig {
 
 // The active network for this process. Resolved once at boot.
 export const ACTIVE: NetworkConfig = resolveActive()
+
+// A token's metadata, from THIS network's registry.
+//
+// One process serves one network, and that is what makes the answer unambiguous.
+// Lux and Zoo were deployed from the same account in the same order, so they
+// share addresses AND bytecode: 0x848cff46 is LUSD on Lux and ZUSD on Zoo,
+// 0x4888e4a2 is WLUX on one and WZOO on the other. Merged into one map by
+// address, whichever list was added last answered for both chains — a quote on
+// Lux came back routed "CYRUS -> ZUSD -> WZOO".
+const tokensByAddress = new Map<string, TokenMeta>(
+  ACTIVE.tokens.map((t) => [t.address.toLowerCase(), t]),
+)
+
+export function getTokenMeta(address: string): TokenMeta | undefined {
+  return tokensByAddress.get(address.toLowerCase())
+}

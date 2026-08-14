@@ -2,11 +2,11 @@ import { Request, Response } from 'express'
 import fetch from 'node-fetch'
 import { cacheGet, cacheSet, TTL } from './cache'
 import { getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphSwaps, getSubgraphV3Pools, getV3Bundle, getSubgraphV3Swaps, getRankedTokens, deriveUsd } from './subgraph'
-import { getTokenMeta } from './lux-tokens'
+
 import { filterRealMarkets, type RawMarket } from './dexMarkets'
 import { isDexQuery } from './dexRouting'
 import { queryDChain, fetchMarkets } from './dchain'
-import { ACTIVE } from './networks'
+import { ACTIVE, getTokenMeta } from './networks'
 import { upstreamPrices } from './upstream'
 
 // Real-asset gate for the AMM token/pool surfaces. The native graph indexes junk/test

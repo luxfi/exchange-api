@@ -1,7 +1,7 @@
 import fetch from 'node-fetch'
 import { cacheGet, cacheSet, TTL } from './cache'
-import { getTokenMeta } from './lux-tokens'
-import { ACTIVE } from './networks'
+
+import { ACTIVE, getTokenMeta } from './networks'
 import { upstreamPrices } from './upstream'
 
 // Data source is the NATIVE Lux graph engine (luxfi/graph) embedded in the
@@ -265,7 +265,7 @@ export interface RankedToken {
 }
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
-const STABLECOINS = new Set(['USDT', 'USDC', 'LUSD', 'DAI', 'BUSD'])
+const STABLECOINS = new Set(['USDT', 'USDC', 'LUSD', 'ZUSD', 'DAI', 'BUSD'])
 const OVERFLOW_CAP = 1e12 // decimal-overflow artifacts from tiny pools → drop to 0
 
 // Parse a subgraph USD string, dropping decimal-overflow artifacts to 0. One
