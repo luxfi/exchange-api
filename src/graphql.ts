@@ -215,6 +215,22 @@ function usdAmount(id: string, value?: number): any {
   return value === undefined ? null : { __typename: 'Amount', id, value, currency: 'USD' }
 }
 
+/**
+ * The fields a Token must carry that we have no answer for.
+ *
+ * Present and null, never absent. A field the client selected and the server
+ * omitted is not a smaller answer: the client cannot write the object to its
+ * cache at all, so the whole token comes back undefined and the page reports it
+ * has no data. Every place that builds a Token spreads this, so there is one
+ * statement of what a Token owes its reader.
+ */
+const UNKNOWN_TOKEN_FIELDS = {
+  isBridged: false,
+  bridgedWithdrawalInfo: null,
+  feeData: null,
+  protectionInfo: null,
+} as const
+
 function tokenResponseFromUsd(address: string, chain: string, v: {
   symbol: string
   name: string
@@ -237,15 +253,7 @@ function tokenResponseFromUsd(address: string, chain: string, v: {
     name: v.name,
     decimals: v.decimals,
     standard: 'ERC20',
-    // A token page asks for every one of these. A field the client selected and
-    // the server omitted is not a smaller answer — the client cannot write the
-    // object to its cache at all, so the whole token comes back undefined and
-    // the page reports it has no data. Present and honestly empty is a real
-    // answer; absent is a broken one.
-    isBridged: false,
-    bridgedWithdrawalInfo: null,
-    feeData: null,
-    protectionInfo: null,
+    ...UNKNOWN_TOKEN_FIELDS,
     market: {
       __typename: 'TokenMarket',
       id: `${id}_market`,
@@ -610,6 +618,7 @@ function tokenProjectsFor(contracts: Array<{ chain?: string; address?: string }>
           name: meta.name,
           symbol: meta.symbol,
           standard: 'ERC20',
+          ...UNKNOWN_TOKEN_FIELDS,
           project,
         },
       ],
