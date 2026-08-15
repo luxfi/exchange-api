@@ -368,7 +368,7 @@ const UNKNOWN_TOKEN_FIELDS = {
   protectionInfo: null,
 } as const
 
-function tokenResponseFromUsd(address: string, chain: string, v: {
+export function tokenResponseFromUsd(address: string, chain: string, v: {
   symbol: string
   name: string
   decimals: number
@@ -381,6 +381,11 @@ function tokenResponseFromUsd(address: string, chain: string, v: {
 }): any {
   const id = `${chain}_${address}`
   const isNative = address === '0x0000000000000000000000000000000000000000'
+  // Stated once. The token page reads a valuation twice — off the market, and off
+  // the project's markets list — and two spellings of the same arithmetic is how
+  // one of them drifts.
+  const fdv = usdAmount(`${id}_fdv`, mul(v.priceUSD, v.totalSupply))
+  const mcap = usdAmount(`${id}_mcap`, mul(v.priceUSD, v.circulating))
   const token = {
     __typename: 'Token',
     id,
@@ -398,6 +403,17 @@ function tokenResponseFromUsd(address: string, chain: string, v: {
       price: { __typename: 'Amount', id: `${id}_price`, value: v.priceUSD, currency: 'USD' },
       pricePercentChange: { __typename: 'Amount', id: `${id}_pct`, currency: 'USD', value: 0 },
       volume: { __typename: 'Amount', id: `${id}_vol`, value: v.volumeUSD, currency: 'USD' },
+      // The same figure under the name the token page asks for it by:
+      // `volume24H: volume(duration: DAY)`. This server answers by operation name
+      // and returns a document it composed itself, so an alias the client wrote is
+      // a key this object has to carry. Resolving `volume` alone is not a smaller
+      // answer — the page reads volume24H, finds nothing, and reports no data.
+      volume24H: { __typename: 'Amount', id: `${id}_vol`, value: v.volumeUSD, currency: 'USD' },
+      // A year's high and low need a year of prices, and nothing here keeps them.
+      // Null, which the page draws as the dash it draws for any figure it lacks;
+      // zero would claim the price stood still for a year.
+      priceHigh52W: null,
+      priceLow52W: null,
       // What the token is worth in whole, and what of it is on the market.
       // Both were absent, so the page drew a dash where a valuation belongs
       // however much the token traded — the supply was on the indexer's row the
@@ -406,8 +422,8 @@ function tokenResponseFromUsd(address: string, chain: string, v: {
       // Null where the supply is unknown, which the client renders as the dash
       // it already had. A valuation of an unknown supply is a figure with no
       // meaning; zero would say the token is worth nothing.
-      fullyDilutedValuation: usdAmount(`${id}_fdv`, mul(v.priceUSD, v.totalSupply)),
-      marketCap: usdAmount(`${id}_mcap`, mul(v.priceUSD, v.circulating)),
+      fullyDilutedValuation: fdv,
+      marketCap: mcap,
       priceHistory: [],
       ohlc: [],
       historicalVolume: [],
@@ -420,6 +436,24 @@ function tokenResponseFromUsd(address: string, chain: string, v: {
       safetyLevel: 'VERIFIED',
       isSpam: false,
       spamCode: 0,
+      // What a project says about itself. Nothing here keeps prose or links for
+      // a token, so these are null rather than absent: the page selects them, and
+      // a field it selected and did not receive costs it the whole token.
+      description: null,
+      homepageUrl: null,
+      twitterName: null,
+      // The project's own view of the valuation, which the page reads instead of
+      // the market's when it draws the header figures.
+      markets: [
+        {
+          __typename: 'TokenProjectMarket',
+          id: `${id}_project_market`,
+          fullyDilutedValuation: fdv,
+          marketCap: mcap,
+          priceHigh52W: null,
+          priceLow52W: null,
+        },
+      ],
       tokens: [] as any[],
     },
   }
@@ -436,6 +470,10 @@ function tokenResponseFromUsd(address: string, chain: string, v: {
       name: v.name,
       symbol: v.symbol,
       standard: 'ERC20',
+      // The same market, because this is the same token. The page walks the
+      // project's list to draw the figures beside each one, and this list has a
+      // single member.
+      market: token.market,
     },
   ]
   return token
@@ -696,38 +734,82 @@ async function handleTopV3Pools(chain: string): Promise<any> {
 }
 
 // Handle v2Transactions / v3Transactions
-async function handleTransactions(chain: string): Promise<any> {
-  const swaps = await getSubgraphSwaps(50)
-  const bundle = await getBundle()
-  const ethPrice = bundle ? parseFloat(bundle.ethPrice) : 0
+/**
+ * One side of a swap, as the transactions table reads a token.
+ *
+ * The table selects more of a token than the row itself carries — decimals, a
+ * project, a logo — and a field it selected and did not receive costs it the
+ * whole transaction, so every one of them is stated here, null where unknown.
+ */
+function transactionToken(chain: string, symbol?: string): any {
+  const sym = symbol || '?'
+  // A swap names its sides by symbol; the curated list is where a symbol becomes
+  // an address, a precision and a logo. The native coin is not in that list — it
+  // is not a contract — so it answers for itself.
+  const native = sym.toLowerCase() === ACTIVE.coin.symbol.toLowerCase()
+  const meta = native
+    ? { address: NATIVE_ADDR, symbol: ACTIVE.coin.symbol, name: ACTIVE.coin.name, decimals: 18, logoUrl: ACTIVE.coin.logoUrl ?? null }
+    : ACTIVE.tokens.find(t => t.symbol.toLowerCase() === sym.toLowerCase())
+  const address = native ? null : (meta?.address ?? null)
+  const id = `${chain}_${meta?.address ?? sym}`
+  const self = { __typename: 'Token', id, address, symbol: sym, chain }
+  return {
+    ...self,
+    decimals: meta?.decimals ?? 18,
+    project: {
+      __typename: 'TokenProject',
+      id: `${id}_project`,
+      name: meta?.name ?? sym,
+      tokens: [self],
+      logo: meta?.logoUrl ? { __typename: 'Image', id: `${id}_logo`, url: meta.logoUrl } : null,
+    },
+  }
+}
 
-  const txs = swaps.map(s => ({
+/** The recent swaps, shaped as PoolTransactions. */
+async function poolTransactions(chain: string, first = 50): Promise<any[]> {
+  const swaps = await getSubgraphSwaps(first)
+  return swaps.map(s => ({
     __typename: 'PoolTransaction',
+    // The table keys rows by id and asks which pool version they came from.
+    // Both were absent, and a row the client cannot key is a row it drops.
+    id: s.id,
+    protocolVersion: 'V2',
     hash: s.id.split('-')[0] || s.id,
     timestamp: parseInt(s.timestamp),
     chain,
-    token0: {
-      __typename: 'Token',
-      id: `${chain}_${s.pair?.token0?.symbol || '?'}`,
-      symbol: s.pair?.token0?.symbol || '?',
-      address: null,
-      chain,
-    },
-    token1: {
-      __typename: 'Token',
-      id: `${chain}_${s.pair?.token1?.symbol || '?'}`,
-      symbol: s.pair?.token1?.symbol || '?',
-      address: null,
-      chain,
-    },
+    token0: transactionToken(chain, s.pair?.token0?.symbol),
+    token1: transactionToken(chain, s.pair?.token1?.symbol),
     token0Quantity: Math.abs(parseFloat(s.amount0In) - parseFloat(s.amount0Out)).toString(),
     token1Quantity: Math.abs(parseFloat(s.amount1In) - parseFloat(s.amount1Out)).toString(),
     usdValue: { __typename: 'Amount', id: s.id, value: parseFloat(s.amountUSD), currency: 'USD' },
     type: 'SWAP',
     account: s.sender,
   }))
+}
 
-  return { data: { v2Transactions: txs } }
+async function handleTransactions(chain: string): Promise<any> {
+  return { data: { v2Transactions: await poolTransactions(chain) } }
+}
+
+/**
+ * A token's own transactions, which the token page asks for as a field OF the
+ * token rather than as a list beside it. Same swaps, hung where the page looks.
+ */
+async function handleTokenTransactions(chain: string, address: string | null, first = 50): Promise<any> {
+  const [token, txs] = await Promise.all([
+    handleToken(chain, address),
+    poolTransactions(chain, first),
+  ])
+  return {
+    data: {
+      token: {
+        ...token.data.token,
+        v3Transactions: txs,
+        v2Transactions: txs,
+      },
+    },
+  }
 }
 
 // tokenProjectsFor builds a Uniswap `tokenProjects` payload for the requested contracts,
@@ -804,7 +886,23 @@ export async function handleGraphQL(req: Request, res: Response): Promise<void> 
       case 'Token':
       case 'TokenPrice':
       case 'SimpleToken':
+      // The token page's own two reads. They ask the same question as Token — a
+      // token on a chain — and differ only in how much of the answer they select,
+      // so they are answered from the same place rather than a second one that
+      // could drift from it. Unhandled, they fell through to the native graph,
+      // which has no token(chain:, address:) and refuses them outright.
+      case 'TokenWeb':
+      case 'TokenMarket':
         result = await handleToken(nativeChain, body.variables?.address || null)
+        break
+
+      case 'V2TokenTransactions':
+      case 'V3TokenTransactions':
+        result = await handleTokenTransactions(
+          nativeChain,
+          body.variables?.address || null,
+          body.variables?.first || 50,
+        )
         break
 
       case 'TopV2Pairs':
