@@ -807,9 +807,16 @@ async function handleTokenTransactions(chain: string, address: string | null, fi
         ...token.data.token,
         v3Transactions: txs,
         v2Transactions: txs,
-        // The pools here are v2/v3. There are no v4 transactions to report, and
-        // an empty list says exactly that; the query erroring instead is what put
-        // a banner over the page announcing that data was temporarily away.
+        // V4 is real here — the PoolManager ABI is a live precompile at 0x9999
+        // (LP-9999, receipt settlement), and it emits the standard Initialize /
+        // ModifyLiquidity / Swap events for an indexer to read.
+        //
+        // Empty because no pool has been opened on it yet, not because there is
+        // no V4: a scan of every block on mainnet finds no event at 0x9999 or at
+        // the 0x9010 read view. When the first pool is initialized this becomes a
+        // read of those logs, keyed by poolId. The query ERRORING is what put a
+        // banner over the page announcing data was away; an empty list states the
+        // position honestly.
         v4Transactions: [],
       },
     },
