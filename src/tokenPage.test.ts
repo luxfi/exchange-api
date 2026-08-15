@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { tokenResponseFromUsd } from './graphql'
+import { tokenResponseFromUsd, handleGraphQL } from './graphql'
 
 // This server answers by operation name and returns a document it composed
 // itself, rather than resolving the query it was handed. So the contract is not
@@ -77,4 +77,31 @@ test('an unknown supply yields no valuation rather than a zero one', () => {
   assert.equal(t.market.marketCap, null)
   assert.equal(t.market.fullyDilutedValuation, null)
   assert.equal(t.project.markets[0].marketCap, null)
+})
+
+// Convert carries no chain, so the chain check would hand it to a graph with no
+// `convert` field. It is answered before that check, like tokenProjects.
+function ask(body: any): Promise<any> {
+  return new Promise((resolve) => {
+    handleGraphQL({ body } as any, { json: resolve } as any)
+  })
+}
+
+test('a currency converts to itself at par', async () => {
+  const out = await ask({
+    operationName: 'Convert',
+    variables: { fromCurrency: 'USD', toCurrency: 'USD' },
+  })
+  assert.equal(out.data.convert.value, 1)
+  assert.equal(out.data.convert.currency, 'USD')
+})
+
+test('a pair with no rate answers nothing rather than a made-up rate', async () => {
+  const out = await ask({
+    operationName: 'Convert',
+    variables: { fromCurrency: 'USD', toCurrency: 'EUR' },
+  })
+  // Everything here is priced in USD. Returning 1 would state that a dollar is a
+  // euro; null is read as "priced in USD" and leaves the figures alone.
+  assert.equal(out.data.convert, null)
 })

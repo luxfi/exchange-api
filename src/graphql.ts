@@ -807,6 +807,10 @@ async function handleTokenTransactions(chain: string, address: string | null, fi
         ...token.data.token,
         v3Transactions: txs,
         v2Transactions: txs,
+        // The pools here are v2/v3. There are no v4 transactions to report, and
+        // an empty list says exactly that; the query erroring instead is what put
+        // a banner over the page announcing that data was temporarily away.
+        v4Transactions: [],
       },
     },
   }
@@ -863,6 +867,28 @@ export async function handleGraphQL(req: Request, res: Response): Promise<void> 
     return
   }
 
+  // What a unit of one currency is worth in another. Everything here is priced in
+  // USD, so USD to USD is the identity and is the only rate this holds — the app
+  // asks for exactly that on every page load, and being refused left an error in
+  // the console of an otherwise working page.
+  //
+  // Carries no chain, so it is answered here for the same reason TokenProjects is:
+  // the chain check below would send it to a graph that has no `convert` field.
+  // Another pair would need a rate source this does not have, and a made-up rate
+  // is worse than none — null is the answer the client reads as "priced in USD".
+  if (opName === 'Convert') {
+    const from = body?.variables?.fromCurrency
+    const to = body?.variables?.toCurrency
+    res.json({
+      data: {
+        convert: from === to
+          ? { __typename: 'Amount', id: `convert_${from}_${to}`, value: 1, currency: to }
+          : null,
+      },
+    })
+    return
+  }
+
   // Not a special-cased Lux/Zoo operation (or a raw subgraph query): forward to
   // the native graph engine, which resolves uniswap-v2/v3-shaped fields directly.
   if (!nativeChain) {
@@ -898,6 +924,7 @@ export async function handleGraphQL(req: Request, res: Response): Promise<void> 
 
       case 'V2TokenTransactions':
       case 'V3TokenTransactions':
+      case 'V4TokenTransactions':
         result = await handleTokenTransactions(
           nativeChain,
           body.variables?.address || null,
