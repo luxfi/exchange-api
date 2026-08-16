@@ -1,7 +1,7 @@
 import { Request, Response } from 'express'
 import fetch from 'node-fetch'
 import { cacheGet, cacheSet, TTL } from './cache'
-import { getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphV3Pools, getV3Bundle, getSubgraphV3Swaps, getSubgraphV3TokenSwaps, getRankedTokens, deriveUsd } from './subgraph'
+import { getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphV3Pools, getV3Bundle, getSubgraphV3Swaps, getSubgraphV3TokenSwaps, getRankedTokens, deriveUsd, type SwapPage } from './subgraph'
 
 import { filterRealMarkets, type RawMarket } from './dexMarkets'
 import { isDexQuery } from './dexRouting'
@@ -778,9 +778,9 @@ function transactionToken(chain: string, symbol?: string): any {
  * priced here from the token's own USD price — the same one the page shows
  * above the table.
  */
-async function poolTransactions(chain: string, first = 50, address: string | null = null): Promise<any[]> {
+async function poolTransactions(chain: string, page: SwapPage = { first: 50 }, address: string | null = null): Promise<any[]> {
   const [swaps, ranked] = await Promise.all([
-    address ? getSubgraphV3TokenSwaps(address, first) : getSubgraphV3Swaps(first),
+    address ? getSubgraphV3TokenSwaps(address, page) : getSubgraphV3Swaps(page),
     getRankedTokens().catch(() => [] as Awaited<ReturnType<typeof getRankedTokens>>),
   ])
   const price = new Map(ranked.map(t => [t.address, t.priceUSD]))
@@ -823,10 +823,10 @@ async function handleTransactions(chain: string): Promise<any> {
  * A token's own transactions, which the token page asks for as a field OF the
  * token rather than as a list beside it. Same swaps, hung where the page looks.
  */
-async function handleTokenTransactions(chain: string, address: string | null, first = 50): Promise<any> {
+async function handleTokenTransactions(chain: string, address: string | null, page: SwapPage): Promise<any> {
   const [token, txs] = await Promise.all([
     handleToken(chain, address),
-    poolTransactions(chain, first, address),
+    poolTransactions(chain, page, address),
   ])
   return {
     data: {
@@ -962,11 +962,10 @@ export async function handleGraphQL(req: Request, res: Response): Promise<void> 
       case 'V2TokenTransactions':
       case 'V3TokenTransactions':
       case 'V4TokenTransactions':
-        result = await handleTokenTransactions(
-          nativeChain,
-          body.variables?.address || null,
-          body.variables?.first || 50,
-        )
+        result = await handleTokenTransactions(nativeChain, body.variables?.address || null, {
+          first: body.variables?.first || 50,
+          before: body.variables?.cursor || undefined,
+        })
         break
 
       case 'TopV2Pairs':

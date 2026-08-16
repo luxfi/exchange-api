@@ -207,10 +207,19 @@ const SWAP_FIELDS = `
       sender
       origin`
 
+/** A page of swaps: how many, and only those before this unix time. */
+export interface SwapPage {
+  first: number
+  before?: number
+}
+
+const beforeClause = (p: SwapPage): string => (p.before ? `, timestamp_lt: ${Math.floor(p.before)}` : '')
+
 // The newest swaps on the chain.
-export async function getSubgraphV3Swaps(first: number = 50): Promise<any[]> {
+export async function getSubgraphV3Swaps(page: SwapPage = { first: 50 }): Promise<any[]> {
+  const where = page.before ? `, where: { timestamp_lt: ${Math.floor(page.before)} }` : ''
   const data = await querySubgraphV3(`{
-    swaps(first: ${first}, orderBy: timestamp, orderDirection: desc) {${SWAP_FIELDS}
+    swaps(first: ${page.first}, orderBy: timestamp, orderDirection: desc${where}) {${SWAP_FIELDS}
     }
   }`)
   return data?.swaps || []
@@ -225,9 +234,9 @@ export async function getSubgraphV3Swaps(first: number = 50): Promise<any[]> {
 // pair fills N by itself and every quieter token reads as untraded.
 //
 // One request per pool, together, not one request with an alias per pool: the
-// graph scans a pool's swaps in full and answers aliases in turn, so a token in
-// seventeen pools took forty seconds through one door and three through many.
-export async function getSubgraphV3TokenSwaps(address: string, first: number = 50): Promise<any[]> {
+// graph answers aliases in turn, and a token in seventeen pools outran the
+// timeout through one door and answered in a few seconds through many.
+export async function getSubgraphV3TokenSwaps(address: string, page: SwapPage = { first: 50 }): Promise<any[]> {
   const addr = address.toLowerCase()
   const pools = await querySubgraphV3(`{
     asToken0: pools(first: 50, where: { token0: "${addr}" }) { id }
@@ -235,13 +244,13 @@ export async function getSubgraphV3TokenSwaps(address: string, first: number = 5
   }`)
   const ids = [...new Set([...(pools?.asToken0 || []), ...(pools?.asToken1 || [])].map((p: any) => String(p.id)))]
   const perPool = await Promise.all(ids.map(id => querySubgraphV3(`{
-    swaps(first: ${first}, orderBy: timestamp, orderDirection: desc, where: { pool: "${id}" }) {${SWAP_FIELDS}
+    swaps(first: ${page.first}, orderBy: timestamp, orderDirection: desc, where: { pool: "${id}"${beforeClause(page)} }) {${SWAP_FIELDS}
     }
   }`)))
   return perPool
     .flatMap(d => d?.swaps || [])
     .sort((a: any, b: any) => parseInt(b.timestamp) - parseInt(a.timestamp))
-    .slice(0, first)
+    .slice(0, page.first)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

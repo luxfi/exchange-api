@@ -1,6 +1,6 @@
 {
   "name": "@luxfi/exchange-api",
-  "version": "2.3.33",
+  "version": "2.3.34",
   "private": true,
   "scripts": {
     "dev": "tsx watch src/index.ts",
