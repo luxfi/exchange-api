@@ -26,7 +26,7 @@
 // token that only trades here is the true and only answer.
 
 import { cacheGet, cacheSet, TTL } from './cache'
-import { NETWORKS } from './networks'
+import { ACTIVE, NETWORKS } from './networks'
 
 const FEED = 'https://api.coingecko.com/api/v3/simple/price'
 const WORLD_KEY = 'upstream:world'
@@ -65,6 +65,11 @@ const ASSETS: Record<string, { home: string }> = {
 function venues(asset: string): Array<{ network: string; address: string }> {
   const byNetwork = new Map<string, string>()
   for (const [network, cfg] of Object.entries(NETWORKS)) {
+    // localnet is this machine's loopback. From anywhere else it is a refused
+    // connection per token per poll, and it never priced anything for anyone.
+    if (network === 'localnet' && cfg !== ACTIVE) {
+      continue
+    }
     for (const t of cfg.tokens) {
       if (t.upstream !== asset) {
         continue
