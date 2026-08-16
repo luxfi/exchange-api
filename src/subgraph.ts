@@ -113,25 +113,6 @@ export async function getSubgraphTokens(first: number = 100): Promise<any[]> {
   return data?.tokens || []
 }
 
-// Get swaps from v2 subgraph
-export async function getSubgraphSwaps(first: number = 50): Promise<any[]> {
-  const data = await querySubgraph(`{
-    swaps(first: ${first}, orderBy: timestamp, orderDirection: desc) {
-      id
-      timestamp
-      pair { token0 { symbol } token1 { symbol } }
-      amount0In
-      amount0Out
-      amount1In
-      amount1Out
-      amountUSD
-      sender
-      to
-    }
-  }`)
-  return data?.swaps || []
-}
-
 // V3 Subgraph queries
 
 // Get V3 pools
@@ -216,20 +197,51 @@ export async function getV3ProtocolDays(days: number = 1000): Promise<ProtocolDa
 }
 
 // Get V3 swaps
-export async function getSubgraphV3Swaps(first: number = 50): Promise<any[]> {
-  const data = await querySubgraphV3(`{
-    swaps(first: ${first}, orderBy: timestamp, orderDirection: desc) {
+const SWAP_FIELDS = `
       id
       timestamp
-      pool { token0 { symbol } token1 { symbol } }
+      pool { id token0 { id symbol decimals } token1 { id symbol decimals } }
       amount0
       amount1
       amountUSD
       sender
-      origin
+      origin`
+
+// The newest swaps on the chain.
+export async function getSubgraphV3Swaps(first: number = 50): Promise<any[]> {
+  const data = await querySubgraphV3(`{
+    swaps(first: ${first}, orderBy: timestamp, orderDirection: desc) {${SWAP_FIELDS}
     }
   }`)
   return data?.swaps || []
+}
+
+// The newest swaps touching one token.
+//
+// A swap belongs to a pool, and the graph filters swaps only by an exact pool
+// (`pool_in` comes back empty rather than as an error). So the token's pools are
+// asked for first, then each pool's swaps. Taking the chain's newest N and
+// keeping the ones that touch this token is not the same question: the busiest
+// pair fills N by itself and every quieter token reads as untraded.
+//
+// One request per pool, together, not one request with an alias per pool: the
+// graph scans a pool's swaps in full and answers aliases in turn, so a token in
+// seventeen pools took forty seconds through one door and three through many.
+export async function getSubgraphV3TokenSwaps(address: string, first: number = 50): Promise<any[]> {
+  const addr = address.toLowerCase()
+  const pools = await querySubgraphV3(`{
+    asToken0: pools(first: 50, where: { token0: "${addr}" }) { id }
+    asToken1: pools(first: 50, where: { token1: "${addr}" }) { id }
+  }`)
+  const ids = [...new Set([...(pools?.asToken0 || []), ...(pools?.asToken1 || [])].map((p: any) => String(p.id)))]
+  const perPool = await Promise.all(ids.map(id => querySubgraphV3(`{
+    swaps(first: ${first}, orderBy: timestamp, orderDirection: desc, where: { pool: "${id}" }) {${SWAP_FIELDS}
+    }
+  }`)))
+  return perPool
+    .flatMap(d => d?.swaps || [])
+    .sort((a: any, b: any) => parseInt(b.timestamp) - parseInt(a.timestamp))
+    .slice(0, first)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

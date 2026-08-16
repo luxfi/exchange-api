@@ -1,7 +1,7 @@
 import { Request, Response } from 'express'
 import fetch from 'node-fetch'
 import { cacheGet, cacheSet, TTL } from './cache'
-import { getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphSwaps, getSubgraphV3Pools, getV3Bundle, getSubgraphV3Swaps, getRankedTokens, deriveUsd } from './subgraph'
+import { getSubgraphTokens, getSubgraphPairs, getBundle, getSubgraphV3Pools, getV3Bundle, getSubgraphV3Swaps, getSubgraphV3TokenSwaps, getRankedTokens, deriveUsd } from './subgraph'
 
 import { filterRealMarkets, type RawMarket } from './dexMarkets'
 import { isDexQuery } from './dexRouting'
@@ -766,26 +766,53 @@ function transactionToken(chain: string, symbol?: string): any {
   }
 }
 
-/** The recent swaps, shaped as PoolTransactions. */
-async function poolTransactions(chain: string, first = 50): Promise<any[]> {
-  const swaps = await getSubgraphSwaps(first)
-  return swaps.map(s => ({
-    __typename: 'PoolTransaction',
-    // The table keys rows by id and asks which pool version they came from.
-    // Both were absent, and a row the client cannot key is a row it drops.
-    id: s.id,
-    protocolVersion: 'V2',
-    hash: s.id.split('-')[0] || s.id,
-    timestamp: parseInt(s.timestamp),
-    chain,
-    token0: transactionToken(chain, s.pair?.token0?.symbol),
-    token1: transactionToken(chain, s.pair?.token1?.symbol),
-    token0Quantity: Math.abs(parseFloat(s.amount0In) - parseFloat(s.amount0Out)).toString(),
-    token1Quantity: Math.abs(parseFloat(s.amount1In) - parseFloat(s.amount1Out)).toString(),
-    usdValue: { __typename: 'Amount', id: s.id, value: parseFloat(s.amountUSD), currency: 'USD' },
-    type: 'SWAP',
-    account: s.sender,
-  }))
+/**
+ * The recent swaps, shaped as PoolTransactions — the chain's, or one token's.
+ *
+ * The graph answers the v3 shape — a swap belongs to a `pool`, and its
+ * `amount0`/`amount1` are signed base units — whatever the selection asked for.
+ * Reading it as v2 (`pair`, `amount0In`) gave every row a "?" counterparty and
+ * a quantity of NaN, which the table drew as 0.
+ *
+ * The indexer's amountUSD is 0 on a swap it has not yet priced, so such a row is
+ * priced here from the token's own USD price — the same one the page shows
+ * above the table.
+ */
+async function poolTransactions(chain: string, first = 50, address: string | null = null): Promise<any[]> {
+  const [swaps, ranked] = await Promise.all([
+    address ? getSubgraphV3TokenSwaps(address, first) : getSubgraphV3Swaps(first),
+    getRankedTokens().catch(() => [] as Awaited<ReturnType<typeof getRankedTokens>>),
+  ])
+  const price = new Map(ranked.map(t => [t.address, t.priceUSD]))
+  const scale = (raw: string | undefined, decimals: number | string | undefined): number =>
+    Math.abs(parseFloat(raw || '0')) / 10 ** Number(decimals ?? 18)
+  return swaps.map(s => {
+    const t0 = s.pool?.token0
+    const t1 = s.pool?.token1
+    const q0 = scale(s.amount0, t0?.decimals)
+    const q1 = scale(s.amount1, t1?.decimals)
+    const indexed = parseFloat(s.amountUSD || '0')
+    const usd = indexed > 0
+      ? indexed
+      : q0 * (price.get(String(t0?.id ?? '').toLowerCase()) ?? 0) || q1 * (price.get(String(t1?.id ?? '').toLowerCase()) ?? 0)
+    return {
+      __typename: 'PoolTransaction',
+      // The table keys rows by id and asks which pool version they came from.
+      // Both were absent, and a row the client cannot key is a row it drops.
+      id: s.id,
+      protocolVersion: 'V3',
+      hash: s.id.split('#')[0] || s.id,
+      timestamp: parseInt(s.timestamp),
+      chain,
+      token0: transactionToken(chain, t0?.symbol),
+      token1: transactionToken(chain, t1?.symbol),
+      token0Quantity: q0.toString(),
+      token1Quantity: q1.toString(),
+      usdValue: { __typename: 'Amount', id: s.id, value: usd, currency: 'USD' },
+      type: 'SWAP',
+      account: s.origin || s.sender,
+    }
+  })
 }
 
 async function handleTransactions(chain: string): Promise<any> {
@@ -799,14 +826,17 @@ async function handleTransactions(chain: string): Promise<any> {
 async function handleTokenTransactions(chain: string, address: string | null, first = 50): Promise<any> {
   const [token, txs] = await Promise.all([
     handleToken(chain, address),
-    poolTransactions(chain, first),
+    poolTransactions(chain, first, address),
   ])
   return {
     data: {
       token: {
         ...token.data.token,
+        // The page asks v2, v3 and v4 as three queries and concatenates the
+        // answers, so a swap must appear under exactly one. Every pool here is a
+        // v3 pool — the graph's `pairs` are the same rows as its `pools`.
+        v2Transactions: [],
         v3Transactions: txs,
-        v2Transactions: txs,
         // V4 is real here — the PoolManager ABI is a live precompile at 0x9999
         // (LP-9999, receipt settlement), and it emits the standard Initialize /
         // ModifyLiquidity / Swap events for an indexer to read.
