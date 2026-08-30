@@ -55,7 +55,7 @@ The exchange-api is the STABLE ABSTRACTION: the FE never knows the source.
   | `{ fills(first:N){…} }` | `<base>/dex/dex_get_trades?limit=1000` | `tradeToFill` (takerSide→side; tail+reverse → newest-first) |
 
   `<base>` = `DEX_DCHAIN_URL` or `ACTIVE.dexDchainUrl` (networks.ts), the chain
-  route prefix `http://<luxd>:<port>/v1/bc/D`. Per-network in-cluster luxd RPC:
+  route prefix `http://<luxd>:<port>/v1/chain/D`. Per-network in-cluster luxd RPC:
   mainnet `:9630`, testnet `:9640`, devnet/localnet `:9650`. The real-asset gate
   (`dexMarkets.ts` `filterRealMarkets`) runs on the mapped rows before serving, so
   synthetic-seed / phantom-asset markets are stripped at the source.
@@ -69,8 +69,8 @@ The exchange-api is the STABLE ABSTRACTION: the FE never knows the source.
   these queries are unchanged.
 
 - **Verification**: live-verifiable only from a cluster pod — the D-Chain is NOT
-  publicly exposed (`api.lux.network/v1/bc/D` 404s). From a pod:
-  `curl http://<luxd>:<port>/v1/bc/D/dex/dex_get_markets` should return
+  publicly exposed (`api.lux.network/v1/chain/D` 404s). From a pod:
+  `curl http://<luxd>:<port>/v1/chain/D/dex/dex_get_markets` should return
   `{height,…,markets:[…]}`, and the maker (github.com/luxfi/maker) must be seeding
   for the list to be non-empty. The mapping itself is unit-tested offline
   (`dchain.test.ts`, injected transport).
@@ -112,7 +112,7 @@ list (unpriced) when the native graph has not indexed tokens. `graphql.ts.buildT
 and `tokenResponseFromUsd` are the shared GraphQL-Token shapers (one output literal).
 
 ## dexRouter.ts — pure routing/quoting core (no Express; reusable by luxfi/broker)
-- `getClient()` — viem public client bound to `LUX_RPC_URL` (default `https://api.lux.network/v1/bc/C/rpc`), chain 96369.
+- `getClient()` — viem public client bound to `LUX_RPC_URL` (default `https://api.lux.network/v1/chain/C/rpc`), chain 96369.
 - `quoteExactInputSingle / quoteExactOutputSingle(tokenIn,tokenOut,amount,fee)` → QuoterV2 via `readContract` (nonpayable funcs run as `eth_call`); `null` on revert.
 - `bestSingleHop(...)` → enumerate fee tiers `[500,3000,10000]`, tolerate per-tier reverts, pick max-out / min-in.
 - `bestRoute(tokenIn,tokenOut,amount,tradeType)` → best single-hop vs 2-hop through hubs `[WLUX, LUSD]`; structured `{hops[], amountIn, amountOut, gasUseEstimate, priceImpact}`; never throws on partial pool state, `null` only when no route produces output.
