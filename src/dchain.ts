@@ -9,7 +9,7 @@
 //   GET <base>/dex/dex_get_trades?limit=<n>&since=<height>
 //   GET <base>/dex/dex_get_book?market=<poolIdHex>&depth=<n>
 //
-// where <base> is the chain route prefix `http://<luxd>:<port>/v1/chain/D` — the
+// where <base> is the chain route prefix `http://<luxd>:<port>/v1/bc/D` — the
 // SAME base the maker (github.com/luxfi/maker) WRITES orders to over
 // `POST <base>/dex/dex_place` (one chain surface: reads + writes). The read
 // surface returns COMMITTED chain state, identical on every validator at a given
@@ -34,7 +34,7 @@ import { ACTIVE } from './networks'
 import { leadRootField } from './dexRouting'
 import type { RawMarket } from './dexMarkets'
 
-// The D-Chain CLOB read base — the chain route prefix `.../v1/chain/D` (NO trailing
+// The D-Chain CLOB read base — the chain route prefix `.../v1/bc/D` (NO trailing
 // `/dex`; that namespace + method are appended per call). Per-network default in
 // networks.ts (the in-cluster luxd validator RPC); overridable by DEX_DCHAIN_URL
 // for explicit in-cluster wiring (e.g. a load-balanced validator service). A
