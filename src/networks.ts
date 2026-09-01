@@ -53,9 +53,9 @@ export interface NetworkConfig {
   rpcUrl: string
   subgraphUrl: string
   // dexDchainUrl is the native V4 CLOB (D-Chain) read base — the chain route
-  // prefix `.../v1/bc/D` whose dex_get_* JSON endpoints the dchain.ts adapter
+  // prefix `.../v1/chain/D` whose dex_get_* JSON endpoints the dchain.ts adapter
   // reads (markets/orders/fills). The in-cluster luxd validator RPC; override via
-  // DEX_DCHAIN_URL. The D-Chain is NOT publicly exposed (api.lux.network/v1/bc/D
+  // DEX_DCHAIN_URL. The D-Chain is NOT publicly exposed (api.lux.network/v1/chain/D
   // 404s), so this is an in-cluster address, reachable only from a cluster pod.
   dexDchainUrl: string
   contracts: NetworkContracts
@@ -67,9 +67,9 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     chainId: 96369,
     coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png' },
     tokens: LUX_TOKENS,
-    rpcUrl: 'https://api.lux.network/v1/bc/C/rpc',
+    rpcUrl: 'https://api.lux.network/v1/chain/C/rpc',
     subgraphUrl: 'http://explorer.lux-mainnet.svc:8090/v1/graph/cchain/amm/graphql',
-    dexDchainUrl: 'http://luxd-0.luxd-headless.lux-mainnet.svc:9630/v1/bc/D',
+    dexDchainUrl: 'http://luxd-0.luxd-headless.lux-mainnet.svc:9630/v1/chain/D',
     contracts: {
       WLUX: getAddress('0x4888e4a2ee0f03051c72d2bd3acf755ed3498b3e'),
       LUSD: getAddress('0x848Cff46eb323f323b6Bbe1Df274E40793d7f2c2'),
@@ -84,9 +84,9 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     chainId: 96368,
     coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png' },
     tokens: LUX_TOKENS,
-    rpcUrl: 'https://api.lux-test.network/v1/bc/C/rpc',
+    rpcUrl: 'https://api.lux-test.network/v1/chain/C/rpc',
     subgraphUrl: 'http://explorer.lux-testnet.svc:8090/v1/graph/cchain/amm/graphql',
-    dexDchainUrl: 'http://luxd-0.luxd-headless.lux-testnet.svc:9640/v1/bc/D',
+    dexDchainUrl: 'http://luxd-0.luxd-headless.lux-testnet.svc:9640/v1/chain/D',
     contracts: {
       WLUX: getAddress('0xf3a126C12EE4f413573B8a32a36953Bd43719E30'),
       // DLUX is testnet's Lux Dollar — the stable hub (mainnet calls it LUSD).
@@ -104,9 +104,9 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     chainId: 96367,
     coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png' },
     tokens: LUX_TOKENS,
-    rpcUrl: 'https://api.lux-dev.network/v1/bc/C/rpc',
+    rpcUrl: 'https://api.lux-dev.network/v1/chain/C/rpc',
     subgraphUrl: 'http://explorer.lux-devnet.svc:8090/v1/graph/cchain/amm/graphql',
-    dexDchainUrl: 'http://luxd-0.luxd-headless.lux-devnet.svc:9650/v1/bc/D',
+    dexDchainUrl: 'http://luxd-0.luxd-headless.lux-devnet.svc:9650/v1/chain/D',
     contracts: {
       WLUX: getAddress('0xc65ea8882020Af7CDa7854d590C6Fcd34BF364ec'),
       LUSD: ZERO,
@@ -133,12 +133,12 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     // Zoo's node runs in zoo-k8s, so there is no in-cluster name for it from
     // lux-k8s and the raw :9630 LB is firewalled to non-DigitalOcean sources.
     // Answers eth_chainId 0x30e08.
-    rpcUrl: 'https://api.zoo.network/v1/bc/C/rpc',
+    rpcUrl: 'https://api.zoo.network/v1/chain/C/rpc',
     subgraphUrl: 'http://explorer.lux-mainnet.svc:8090/v1/graph/zoo/amm/graphql',
     // Zoo has no D-Chain; this 404s and the CLOB surface renders "No active
     // markets". Named anyway, because the alternative to a wrong answer here is
     // Lux's order book showing up on a Zoo site.
-    dexDchainUrl: 'https://api.zoo.network/v1/bc/D',
+    dexDchainUrl: 'https://api.zoo.network/v1/chain/D',
     contracts: {
       // Zoo's wrapped native and its dollar. These were the zero sentinel, so
       // the coin's own page could not find the row its supply is published on
@@ -156,9 +156,9 @@ export const NETWORKS: Record<string, NetworkConfig> = {
     chainId: 31337,
     coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png' },
     tokens: LUX_TOKENS,
-    rpcUrl: 'http://127.0.0.1:9650/v1/bc/C/rpc',
+    rpcUrl: 'http://127.0.0.1:9650/v1/chain/C/rpc',
     subgraphUrl: 'http://127.0.0.1:8090/v1/graph/cchain/amm/graphql',
-    dexDchainUrl: 'http://127.0.0.1:9650/v1/bc/D',
+    dexDchainUrl: 'http://127.0.0.1:9650/v1/chain/D',
     contracts: {
       WLUX: ZERO, // deterministic local deploy fills these in
       LUSD: ZERO,
