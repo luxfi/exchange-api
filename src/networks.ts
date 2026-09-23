@@ -17,7 +17,7 @@
 // deploy lands per network.
 
 import { getAddress, type Address } from 'viem'
-import { LUX_TOKENS, ZOO_TOKENS, type TokenMeta } from './lux-tokens'
+import { LUX_TOKENS, ZOO_MARK, ZOO_TOKENS, type TokenMeta } from './lux-tokens'
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 const MULTICALL3 = getAddress('0xd25F88CBdAe3c2CCA3Bb75FC4E723b44C0Ea362F')
@@ -44,6 +44,8 @@ export interface NativeCoin {
 export interface NetworkConfig {
   name: string
   chainId: number
+  // The data API's name for this chain (its Chain enum): LUX or ZOO.
+  chain: string
   coin: NativeCoin
   // The curated registry for THIS chain — what the token surfaces fall back to
   // when the graph has indexed nothing yet. It used to read LUX_TOKENS
@@ -64,6 +66,7 @@ export interface NetworkConfig {
 export const NETWORKS: Record<string, NetworkConfig> = {
   mainnet: {
     name: 'mainnet',
+    chain: 'LUX',
     chainId: 96369,
     coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png' },
     tokens: LUX_TOKENS,
@@ -81,6 +84,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
   },
   testnet: {
     name: 'testnet',
+    chain: 'LUX',
     chainId: 96368,
     coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png' },
     tokens: LUX_TOKENS,
@@ -101,6 +105,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
   },
   devnet: {
     name: 'devnet',
+    chain: 'LUX',
     chainId: 96367,
     coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png' },
     tokens: LUX_TOKENS,
@@ -118,17 +123,12 @@ export const NETWORKS: Record<string, NetworkConfig> = {
   },
   // Zoo's own chain. Not a Lux network — a sovereign L1 with its own primary
   // network — but it is a network this image serves, which is what this table
-  // is for. zoo.exchange ran against NETWORK=mainnet before this entry existed,
-  // which meant chainId 96369 on Zoo's RPC: the markets gate's chainId assertion
-  // fired on every poll, and the router quoted against Lux's V3 addresses.
-  //
-  // Contracts are zero because Zoo's AMM is mid-deploy. The router reads a zero
-  // QuoterV2/Factory as "no V3 venue" and returns no quote, which is the honest
-  // answer until they land — fill them in then, the way testnet's were.
+  // is for.
   zoo: {
     name: 'zoo',
+    chain: 'ZOO',
     chainId: 200200,
-    coin: { symbol: 'ZOO', name: 'Zoo', logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo.svg' },
+    coin: { symbol: 'ZOO', name: 'Zoo', logoUrl: ZOO_MARK },
     tokens: ZOO_TOKENS,
     // Zoo's node runs in zoo-k8s, so there is no in-cluster name for it from
     // lux-k8s and the raw :9630 LB is firewalled to non-DigitalOcean sources.
@@ -145,14 +145,18 @@ export const NETWORKS: Record<string, NetworkConfig> = {
       // and printed a dash where a valuation belongs.
       WLUX: '0x4888E4a2Ee0F03051c72D2BD3ACf755eD3498B3E',
       LUSD: '0x848Cff46eb323f323b6Bbe1Df274E40793d7f2c2',
-      V3_QUOTER_V2: ZERO,
-      V3_SWAP_ROUTER_02: ZERO,
-      V3_FACTORY: ZERO,
+      // V3 is deployed on Zoo at the canonical addresses, as on Lux: the
+      // router's WETH9() is Zoo's wrapper and its factory() is this factory,
+      // which holds the WZOO/ZUSD 0.3% pool.
+      V3_QUOTER_V2: getAddress('0x15C729fdd833Ba675edd466Dfc63E1B737925A4c'),
+      V3_SWAP_ROUTER_02: getAddress('0x939bC0Bca6F9B9c52E6e3AD8A3C590b5d9B9D10E'),
+      V3_FACTORY: getAddress('0x80bBc7C4C7a59C899D1B37BC14539A22D5830a84'),
       MULTICALL3,
     },
   },
   localnet: {
     name: 'localnet',
+    chain: 'LUX',
     chainId: 31337,
     coin: { symbol: 'LUX', name: 'Lux', logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png' },
     tokens: LUX_TOKENS,
@@ -183,6 +187,11 @@ function resolveActive(): NetworkConfig {
 
 // The active network for this process. Resolved once at boot.
 export const ACTIVE: NetworkConfig = resolveActive()
+
+/** A network's own coin, at the zero-address sentinel. */
+export function nativeOf(net: NetworkConfig): TokenMeta {
+  return { address: ZERO, symbol: net.coin.symbol, name: net.coin.name, decimals: 18, logoUrl: net.coin.logoUrl }
+}
 
 // A token's metadata, from THIS network's registry.
 //

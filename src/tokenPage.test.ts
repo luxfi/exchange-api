@@ -105,3 +105,17 @@ test('a pair with no rate answers nothing rather than a made-up rate', async () 
   // euro; null is read as "priced in USD" and leaves the figures alone.
   assert.equal(out.data.convert, null)
 })
+
+// The app asks for tokens on chains this API does not serve, USDC on BASE among
+// them. It has none there, and says so, rather than handing a Uniswap query to a
+// graph that cannot parse it.
+test('a token on another chain is no token, not an error', async () => {
+  for (const chain of ['ETHEREUM', 'BASE']) {
+    const out = await ask({
+      operationName: 'Token',
+      query: 'query Token($chain: Chain!, $address: String) { token(chain: $chain, address: $address) { id } }',
+      variables: { chain, address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
+    })
+    assert.deepEqual(out, { data: { token: null } })
+  }
+})

@@ -8,7 +8,8 @@ import fetch from 'node-fetch'
 import type { Request, Response } from 'express'
 import { handleSwappableTokens, handleQuote, handleCheckApproval, buildSwappableTokens } from './trading'
 import { getClient, ADDRESSES, NATIVE_SENTINEL } from './dexRouter'
-import { LUX_TOKENS } from './lux-tokens'
+import { LUX_TOKENS, ZOO_TOKENS } from './lux-tokens'
+import { NETWORKS } from './networks'
 
 const CYRUS = '0x0A78f7Ce8D65e0FD4D6B78848483bA3C4fb895c5'
 const WLUX = ADDRESSES.WLUX
@@ -158,6 +159,28 @@ test('buildSwappableTokens(order): subgraph ranks curated tokens but never chang
   // Membership unchanged: full curated set, junk still absent (the rank for junk is ignored).
   assert.equal(tokens.length, LUX_TOKENS.length)
   assert.ok(!new Set(tokens.map((t) => t.address.toLowerCase())).has(JUNK_USDC))
+})
+
+// One image serves Lux and Zoo. Zoo's list opens with ZOO on Zoo's chain and names
+// no Lux coin; it used to open with LUX, drawn from Lux's CDN, on chain 200200.
+test("buildSwappableTokens(zoo): Zoo's coin first, Zoo's tokens only, Zoo's chain", () => {
+  const tokens = buildSwappableTokens([], NETWORKS.zoo)
+  assert.equal(tokens[0].address, NATIVE_SENTINEL)
+  assert.equal(tokens[0].symbol, 'ZOO')
+  assert.equal(tokens[0].name, 'Zoo')
+  assert.equal(tokens.length, ZOO_TOKENS.length)
+  for (const t of tokens) {
+    assert.equal(t.chainId, 200200)
+    assert.notEqual(t.symbol, 'LUX')
+    assert.ok(!t.project.logo?.url.includes('lux.network'), `${t.symbol} logo ${t.project.logo?.url}`)
+  }
+})
+
+test("Zoo's V3 venue is named, so Zoo quotes route", () => {
+  const c = NETWORKS.zoo.contracts
+  for (const a of [c.V3_QUOTER_V2, c.V3_SWAP_ROUTER_02, c.V3_FACTORY]) {
+    assert.notEqual(a, '0x0000000000000000000000000000000000000000')
+  }
 })
 
 // ── quote ─────────────────────────────────────────────────────────────────────

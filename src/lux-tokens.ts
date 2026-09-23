@@ -201,6 +201,10 @@ export const LUX_TOKENS: TokenMeta[] = [
   },
 ]
 
+// Zoo's marks are served by Zoo's own exchange, beside the app that draws them.
+const zooMark = (name: string): string => `https://exchange.zoo.network/tokens/${name}.svg`
+export const ZOO_MARK = zooMark('zoo')
+
 // Zoo mainnet (200200). Every address and every decimals here was read off the
 // chain, and so were the symbols — except the wrapper's.
 //
@@ -219,7 +223,7 @@ export const ZOO_TOKENS: TokenMeta[] = [
     symbol: 'ZOO',
     name: 'Zoo',
     decimals: 18,
-    logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo.svg',
+    logoUrl: ZOO_MARK,
     upstream: 'zoo',
   },
   {
@@ -234,7 +238,7 @@ export const ZOO_TOKENS: TokenMeta[] = [
     symbol: 'ZOO',
     name: 'Zoo',
     decimals: 18,
-    logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo.svg',
+    logoUrl: ZOO_MARK,
     upstream: 'zoo',
   },
   {
@@ -242,7 +246,7 @@ export const ZOO_TOKENS: TokenMeta[] = [
     symbol: 'ZLUX',
     name: 'Zoo LUX',
     decimals: 18,
-    logoUrl: 'https://cdn.lux.network/exchange/icon-png/lux.png',
+    logoUrl: zooMark('lux'),
     upstream: 'lux',
   },
   {
@@ -250,14 +254,14 @@ export const ZOO_TOKENS: TokenMeta[] = [
     symbol: 'ZUSD',
     name: 'Zoo Dollar',
     decimals: 18,
-    logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo/zusd.svg',
+    logoUrl: zooMark('zusd'),
   },
   {
     address: '0x1E48D32a4F5e9f08DB9aE4959163300FaF8A6C8e',
     symbol: 'ZBTC',
     name: 'Zoo BTC',
     decimals: 18,
-    logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo/zbtc.svg',
+    logoUrl: zooMark('zbtc'),
     upstream: 'bitcoin',
   },
   {
@@ -265,7 +269,7 @@ export const ZOO_TOKENS: TokenMeta[] = [
     symbol: 'ZETH',
     name: 'Zoo ETH',
     decimals: 18,
-    logoUrl: 'https://cdn.lux.network/bridge/currencies/zoo/zeth.svg',
+    logoUrl: zooMark('zeth'),
     upstream: 'ethereum',
   },
   {
@@ -322,12 +326,6 @@ export const ZOO_TOKENS: TokenMeta[] = [
     logoUrl: null,
   },
 ]
-
-// Native LUX (the zero sentinel on chainId 96369). Exported explicitly because the
-// generic address map below collides at 0x0..0 (both LUX and ZOO use the sentinel for
-// their native coin); a sentinel lookup is therefore ambiguous and must NOT be used to
-// resolve native LUX. The trading API is C-Chain-only, where native == LUX.
-export const LUX_NATIVE: TokenMeta = LUX_TOKENS[0]
 
 // One process serves one network, so a lookup answers from THAT network's
 // registry.

@@ -135,6 +135,9 @@ export async function sanitizeDexData(data: any): Promise<any> {
 // else (and raw subgraph queries) is forwarded to the native graph as-is.
 const NATIVE_CHAINS = new Set(['LUX', 'ZOO'])
 
+// The operations that ask for one token on one chain.
+const TOKEN_OPS = new Set(['Token', 'TokenPrice', 'SimpleToken', 'TokenWeb', 'TokenMarket'])
+
 function isNativeChainQuery(body: any): string | null {
   const vars = body.variables || {}
   // Check common variable patterns
@@ -854,8 +857,8 @@ async function handleTokenTransactions(chain: string, address: string | null, pa
 }
 
 // tokenProjectsFor builds a Uniswap `tokenProjects` payload for the requested contracts,
-// including only those that resolve to a known Lux token (by address). Non-Lux contracts
-// (ETHEREUM/POLYGON/…) yield no project — the LX_API serves only Lux-ecosystem tokens.
+// including only those that resolve to a token of the network this process serves.
+// Other chains' contracts (ETHEREUM/POLYGON/…) yield no project.
 function tokenProjectsFor(contracts: Array<{ chain?: string; address?: string }> | undefined): any[] {
   const out: any[] = []
   for (const c of contracts || []) {
@@ -863,7 +866,7 @@ function tokenProjectsFor(contracts: Array<{ chain?: string; address?: string }>
     if (!addr) continue
     const meta = getTokenMeta(addr)
     if (!meta) continue
-    const id = `LUX_${meta.address}`
+    const id = `${ACTIVE.chain}_${meta.address}`
     const project = { __typename: 'TokenProject', id: `${id}_project`, logoUrl: meta.logoUrl || null, safetyLevel: 'VERIFIED', isSpam: false }
     out.push({
       ...project,
@@ -872,7 +875,7 @@ function tokenProjectsFor(contracts: Array<{ chain?: string; address?: string }>
         {
           __typename: 'Token',
           id,
-          chain: 'LUX',
+          chain: ACTIVE.chain,
           address: meta.address,
           decimals: meta.decimals,
           name: meta.name,
@@ -923,6 +926,15 @@ export async function handleGraphQL(req: Request, res: Response): Promise<void> 
           : null,
       },
     })
+    return
+  }
+
+  // A token on another chain — the app asks for USDC on BASE and the like. This
+  // API holds only its own network's tokens, so the answer is that it has none;
+  // the native graph cannot parse the Uniswap query and answered with an error.
+  const chain = body?.variables?.chain
+  if (TOKEN_OPS.has(opName) && typeof chain === 'string' && !NATIVE_CHAINS.has(chain)) {
+    res.json({ data: { token: null } })
     return
   }
 

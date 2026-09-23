@@ -18,7 +18,8 @@ import {
 } from 'viem'
 import { cacheGet, cacheSet, TTL } from './cache'
 import { getSubgraphPairs, getSubgraphV3Pools } from './subgraph'
-import { LUX_TOKENS, LUX_NATIVE, type TokenMeta } from './lux-tokens'
+import type { TokenMeta } from './lux-tokens'
+import { ACTIVE, nativeOf, type NetworkConfig } from './networks'
 import {
   ADDRESSES,
   CHAIN_ID,
@@ -80,12 +81,13 @@ interface SwappableToken {
   decimals: number
 }
 
-// Project a curated token into the response shape. Native LUX keeps the zero sentinel as
-// its address; ERC20s are checksummed. Every curated token is VERIFIED by construction.
-function curatedSwappableToken(t: TokenMeta): SwappableToken {
+// Project a curated token into the response shape. The native coin keeps the zero
+// sentinel as its address; ERC20s are checksummed. Every curated token is VERIFIED by
+// construction.
+function curatedSwappableToken(t: TokenMeta, chainId: number): SwappableToken {
   return {
     address: isNative(t.address) ? NATIVE_SENTINEL : getAddress(t.address),
-    chainId: CHAIN_ID,
+    chainId,
     name: t.name,
     symbol: t.symbol,
     project: {
@@ -98,11 +100,12 @@ function curatedSwappableToken(t: TokenMeta): SwappableToken {
   }
 }
 
-// Pure core: the curated set (source of truth) ordered by a subgraph liquidity ranking.
-// Membership is ALWAYS the full curated list — native LUX first, then the rest sorted by
-// `order` (unknown/unranked addresses sink to the end; curated order breaks ties). The
-// subgraph can neither add nor remove a token here. No I/O — unit-testable in isolation.
-export function buildSwappableTokens(order: string[]): SwappableToken[] {
+// Pure core: a network's curated set (source of truth) ordered by a subgraph liquidity
+// ranking. Membership is ALWAYS the network's full curated list — its own coin first,
+// then the rest sorted by `order` (unknown/unranked addresses sink to the end; curated
+// order breaks ties). The subgraph can neither add nor remove a token here. No I/O —
+// unit-testable in isolation, for any network.
+export function buildSwappableTokens(order: string[], net: NetworkConfig = ACTIVE): SwappableToken[] {
   const rank = new Map<string, number>()
   order.forEach((addr, i) => {
     const key = addr.toLowerCase()
@@ -110,12 +113,12 @@ export function buildSwappableTokens(order: string[]): SwappableToken[] {
   })
   const rankOf = (addr: string): number => rank.get(addr.toLowerCase()) ?? Number.MAX_SAFE_INTEGER
 
-  const rest = LUX_TOKENS.map((t, idx) => ({ t, idx }))
+  const rest = net.tokens.map((t, idx) => ({ t, idx }))
     .filter(({ t }) => !isNative(t.address))
     .sort((a, b) => rankOf(a.t.address) - rankOf(b.t.address) || a.idx - b.idx)
     .map(({ t }) => t)
 
-  return [LUX_NATIVE, ...rest].map(curatedSwappableToken)
+  return [nativeOf(net), ...rest].map((t) => curatedSwappableToken(t, net.chainId))
 }
 
 // Subgraph-derived ORDERING hint: lowercase token addresses in descending-liquidity order
@@ -154,10 +157,10 @@ export async function handleSwappableTokens(req: Request, res: Response): Promis
     if (chainIdRaw !== undefined && Number.isNaN(parseInt(String(chainIdRaw), 10))) {
       return badRequest(res, 'tokenInChainId must be a number')
     }
-    // LX_API is single-chain (Lux C-Chain 96369). The interface prefetches this list with
-    // whatever chain the swap form currently holds — possibly a transient generic default.
-    // We ignore it and always serve the Lux set (every token carries chainId 96369) so the
-    // selector never empties; cross-chain semantics don't apply to a one-chain venue.
+    // One process serves one chain. The interface prefetches this list with whatever
+    // chain the swap form currently holds — possibly a transient generic default. We
+    // ignore it and always serve this network's set so the selector never empties;
+    // cross-chain semantics don't apply to a one-chain venue.
     const tokens = buildSwappableTokens(await subgraphTokenOrder())
     res.json({ requestId: randomUUID(), tokens })
   } catch (e) {
@@ -206,7 +209,7 @@ async function tokenInRoute(
   return {
     address: echoAs !== null ? echoToken(echoAs) : getAddress(onChain),
     chainId: CHAIN_ID,
-    symbol: echoAs !== null && isNative(echoAs) ? LUX_NATIVE.symbol : t.symbol,
+    symbol: echoAs !== null && isNative(echoAs) ? ACTIVE.coin.symbol : t.symbol,
     decimals: String(t.decimals),
   }
 }
@@ -335,8 +338,8 @@ export async function handleQuote(req: Request, res: Response): Promise<void> {
       resolveToken(wrappedIn),
       resolveToken(wrappedOut),
     ])
-    const inSym = isNative(body.tokenIn) ? LUX_NATIVE.symbol : inMeta.symbol
-    const outSym = isNative(body.tokenOut) ? LUX_NATIVE.symbol : outMeta.symbol
+    const inSym = isNative(body.tokenIn) ? ACTIVE.coin.symbol : inMeta.symbol
+    const outSym = isNative(body.tokenOut) ? ACTIVE.coin.symbol : outMeta.symbol
 
     // Echo native sentinel back on the boundary hops only.
     const lastIdx = route.hops.length - 1
