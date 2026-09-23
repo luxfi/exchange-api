@@ -107,10 +107,10 @@ test('a pair with no rate answers nothing rather than a made-up rate', async () 
 })
 
 // The app asks for tokens on chains this API does not serve, USDC on BASE among
-// them. It has none there, and says so, rather than handing a Uniswap query to a
-// graph that cannot parse it.
+// them, and Zoo's chain on Lux's deployment. It has none there, and says so,
+// rather than handing a Uniswap query to a graph that cannot parse it.
 test('a token on another chain is no token, not an error', async () => {
-  for (const chain of ['ETHEREUM', 'BASE']) {
+  for (const chain of ['ETHEREUM', 'BASE', 'ZOO']) {
     const out = await ask({
       operationName: 'Token',
       query: 'query Token($chain: Chain!, $address: String) { token(chain: $chain, address: $address) { id } }',
@@ -118,4 +118,9 @@ test('a token on another chain is no token, not an error', async () => {
     })
     assert.deepEqual(out, { data: { token: null } })
   }
+})
+
+test("another chain's top tokens are none, not this chain's under its name", async () => {
+  const out = await ask({ operationName: 'TopTokens', variables: { chain: 'ZOO', page: 1, pageSize: 10 } })
+  assert.deepEqual(out, { data: { topTokens: [] } })
 })

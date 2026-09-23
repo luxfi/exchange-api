@@ -9,8 +9,8 @@
 // and maps each TokenRankingsStat → CurrencyInfo. The mapper
 // (tokenRankingsStatToCurrencyInfo) DROPS any token missing chain/symbol/name/
 // decimals, and resolves chain via fromGraphQLChain — so `chain` MUST be the
-// GraphQL enum string "LUX" (which maps to UniverseChainId.Lux = 96369), never a
-// numeric id, and symbol/name/decimals are mandatory on every stat.
+// GraphQL enum string of the network this process serves ("LUX" → 96369, "ZOO" →
+// 200200), never a numeric id, and symbol/name/decimals are mandatory on every stat.
 //
 // Connect unary over HTTP/JSON, both forms (we serve BOTH; the web GET transport
 // uses the first, a POST transport the second):
@@ -41,9 +41,10 @@ const RANKING_TRENDING = 'TRENDING'
 const RANKING_1D_ASC = 'PRICE_PERCENT_CHANGE_1_DAY_ASC'
 const RANKING_1D_DESC = 'PRICE_PERCENT_CHANGE_1_DAY_DESC'
 
-// The GraphQL Chain enum string for Lux (GraphQLApi.Chain.Lux === "LUX", → 96369).
-const LUX_CHAIN = 'LUX'
-const LUX_CHAIN_ID = String(ACTIVE.chainId)
+// The GraphQL Chain enum string of the network this process serves. The app draws
+// that chain's badge on every row.
+const CHAIN = ACTIVE.chain
+const CHAIN_ID = String(ACTIVE.chainId)
 // The sentinel chainId meaning "all networks" (connectRpc/base.ts ALL_NETWORKS_ARG).
 const ALL_NETWORKS_ARG = 'ALL_NETWORKS'
 
@@ -95,14 +96,14 @@ export function parseRankingsRequest(req: Request): { value: TokenRankingsReques
   return { value: body as TokenRankingsRequestJson }
 }
 
-// LX_API is a single-chain venue (Lux C-Chain, 96369). Accept that chain, its
+// One process serves one chain (ACTIVE.chainId). Accept that chain, its
 // numeric string, the ALL_NETWORKS aggregate, or an unset chainId (the FE
 // prefetches before the brand config resolves the chain). Any OTHER concrete chain
 // has no tokens here — return an empty ranking rather than error, mirroring the
 // trading-api's "serve our tokens" stance, so the selector never shows an error.
 export function chainIsServed(chainId: string | undefined): boolean {
   if (chainId === undefined || chainId === '') return true
-  return chainId === LUX_CHAIN_ID || chainId === ALL_NETWORKS_ARG
+  return chainId === CHAIN_ID || chainId === ALL_NETWORKS_ARG
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -121,8 +122,8 @@ function usd(value: number): { currency: 'USD'; value: number } {
 
 export function toRankingsStat(t: RankedToken): Record<string, unknown> {
   const stat: Record<string, unknown> = {
-    chain: LUX_CHAIN,
-    // Native LUX keeps the zero sentinel; the FE's buildCurrency treats the
+    chain: CHAIN,
+    // The native coin keeps the zero sentinel; the FE's buildCurrency treats the
     // sentinel address as the native currency on the chain.
     address: t.address === NATIVE_SENTINEL ? NATIVE_SENTINEL : t.address,
     name: t.name,
@@ -229,11 +230,11 @@ async function priceTokenUsd(addr: string, decimals: number, symbol: string): Pr
   }
 }
 
-// RankedToken → TokenStats (proto3 JSON, camelCase). chain is the GraphQL enum
-// string "LUX". price/volume omitted when zero (optional Amount fields).
+// RankedToken → TokenStats (proto3 JSON, camelCase). chain is the served network's
+// GraphQL enum string. price/volume omitted when zero (optional Amount fields).
 function toTokenStats(t: RankedToken, priceUSD: number): Record<string, unknown> {
   const stat: Record<string, unknown> = {
-    chain: LUX_CHAIN,
+    chain: CHAIN,
     address: t.address,
     name: t.name,
     symbol: t.symbol,
@@ -300,7 +301,7 @@ function buildProtocolStats(days: ProtocolDay[]): {
 // table drops a row whose tokens lack symbol/name, so both are always emitted.
 function toPoolStats(p: Record<string, any>): Record<string, unknown> {
   const tok = (t: Record<string, any> | undefined): Record<string, unknown> => ({
-    chain: LUX_CHAIN,
+    chain: CHAIN,
     address: String(t?.id || '').toLowerCase(),
     symbol: t?.symbol || 'UNKNOWN',
     name: t?.name || t?.symbol || 'Unknown Token',
@@ -309,7 +310,7 @@ function toPoolStats(p: Record<string, any>): Record<string, unknown> {
   })
   const stat: Record<string, unknown> = {
     id: String(p.id).toLowerCase(),
-    chain: LUX_CHAIN,
+    chain: CHAIN,
     protocolVersion: 'V3',
     feeTier: parseInt(p.feeTier, 10) || 0,
     txCount: parseInt(p.txCount, 10) || 0,

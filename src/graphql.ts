@@ -131,22 +131,40 @@ export async function sanitizeDexData(data: any): Promise<any> {
   return out
 }
 
-// Chains we special-case with shaped Token/V2Pair/V3Pool responses. Everything
-// else (and raw subgraph queries) is forwarded to the native graph as-is.
-const NATIVE_CHAINS = new Set(['LUX', 'ZOO'])
-
-// The operations that ask for one token on one chain.
-const TOKEN_OPS = new Set(['Token', 'TokenPrice', 'SimpleToken', 'TokenWeb', 'TokenMarket'])
-
+// The one chain this process serves gets shaped Token/V2Pair/V3Pool responses.
+// Everything else (and raw subgraph queries) is forwarded to the native graph.
 function isNativeChainQuery(body: any): string | null {
   const vars = body.variables || {}
-  // Check common variable patterns
-  if (vars.chain && NATIVE_CHAINS.has(vars.chain)) return vars.chain
-  if (vars.chains && Array.isArray(vars.chains)) {
-    const native = vars.chains.find((c: string) => NATIVE_CHAINS.has(c))
-    if (native) return native
-  }
+  if (vars.chain === ACTIVE.chain) return ACTIVE.chain
+  if (Array.isArray(vars.chains) && vars.chains.includes(ACTIVE.chain)) return ACTIVE.chain
   return null
+}
+
+// What a shaped operation answers for a chain this process does not serve: that
+// it holds nothing there. The sibling network's chain is one of those — Zoo's
+// deployment asked for LUX answers as it does for ETHEREUM, never with its own
+// tokens under Lux's name — and the native graph cannot parse these queries.
+const EMPTY_ELSEWHERE: Record<string, Record<string, unknown>> = {
+  TopTokens100: { topTokens: [] },
+  TopTokens: { topTokens: [] },
+  TopTokensSparkline: { topTokens: [] },
+  Token: { token: null },
+  TokenPrice: { token: null },
+  SimpleToken: { token: null },
+  TokenWeb: { token: null },
+  TokenMarket: { token: null },
+  V2TokenTransactions: { token: null },
+  V3TokenTransactions: { token: null },
+  V4TokenTransactions: { token: null },
+  TopV2Pairs: { topV2Pairs: [] },
+  TopV3Pools: { topV3Pools: [] },
+}
+
+function namesOnlyOtherChains(body: any): boolean {
+  const vars = body.variables || {}
+  if (typeof vars.chain === 'string') return vars.chain !== ACTIVE.chain
+  if (Array.isArray(vars.chains) && vars.chains.length > 0) return !vars.chains.includes(ACTIVE.chain)
+  return false
 }
 
 function extractOperationName(body: any): string {
@@ -929,12 +947,9 @@ export async function handleGraphQL(req: Request, res: Response): Promise<void> 
     return
   }
 
-  // A token on another chain — the app asks for USDC on BASE and the like. This
-  // API holds only its own network's tokens, so the answer is that it has none;
-  // the native graph cannot parse the Uniswap query and answered with an error.
-  const chain = body?.variables?.chain
-  if (TOKEN_OPS.has(opName) && typeof chain === 'string' && !NATIVE_CHAINS.has(chain)) {
-    res.json({ data: { token: null } })
+  // The app asks about other chains too — USDC on BASE and the like.
+  if (opName in EMPTY_ELSEWHERE && namesOnlyOtherChains(body)) {
+    res.json({ data: EMPTY_ELSEWHERE[opName] })
     return
   }
 
