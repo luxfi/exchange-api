@@ -1,0 +1,9 @@
+# Hanzo CI/CD for luxfi/exchange-api: .github/workflows/cicd.yml imports hanzoai/ci,
+# which reads this file. The build door builds each image, one BuildKit Job
+# per platform.
+images:
+  - name: exchange-api
+    context: .
+    dockerfile: Dockerfile
+    repo: ghcr.io/luxfi/exchange-api
+    platforms: [linux/amd64]
